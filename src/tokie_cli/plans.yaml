@@ -1,0 +1,153 @@
+version: 1
+updated: 2026-04-20
+plans:
+  - id: claude_pro_personal
+    display_name: Claude Pro
+    source_url: https://www.anthropic.com/pricing
+    notes: Shared bucket across claude-code, claude-web, claude-desktop, claude-mobile.
+    subscription:
+      id: claude_pro_personal
+      provider: anthropic
+      product: claude-pro
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: rolling_5h
+          limit_messages: 45
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+        - window_type: weekly
+          limit_messages: 900
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+
+  - id: claude_max5_personal
+    display_name: Claude Max 5x
+    source_url: https://www.anthropic.com/max
+    notes: 5x Pro allowance on the same shared bucket.
+    subscription:
+      id: claude_max5_personal
+      provider: anthropic
+      product: claude-pro
+      plan: max5
+      account_id: default
+      windows:
+        - window_type: rolling_5h
+          limit_messages: 225
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+        - window_type: weekly
+          limit_messages: 4500
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+
+  - id: claude_max20_personal
+    display_name: Claude Max 20x
+    source_url: https://www.anthropic.com/max
+    notes: 20x Pro allowance.
+    subscription:
+      id: claude_max20_personal
+      provider: anthropic
+      product: claude-pro
+      plan: max20
+      account_id: default
+      windows:
+        - window_type: rolling_5h
+          limit_messages: 900
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+        - window_type: weekly
+          limit_messages: 18000
+          shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
+
+  - id: anthropic_api_direct
+    display_name: Anthropic API (pay-as-you-go)
+    source_url: https://docs.anthropic.com/en/api/rate-limits
+    notes: No subscription window; billed per-token. Rate limits exist but are not quota caps.
+    subscription:
+      id: anthropic_api_direct
+      provider: anthropic
+      product: anthropic-api
+      plan: payg
+      account_id: default
+      windows:
+        - window_type: none
+
+  - id: openai_tier1
+    display_name: OpenAI API Tier 1
+    source_url: https://platform.openai.com/docs/guides/rate-limits
+    notes: New accounts; monthly spend cap around $100 depending on org settings.
+    subscription:
+      id: openai_tier1
+      provider: openai
+      product: openai-api
+      plan: tier1
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_usd: 100.0
+
+  - id: openai_tier2
+    display_name: OpenAI API Tier 2
+    source_url: https://platform.openai.com/docs/guides/rate-limits
+    notes: After $50 paid and 7 days since first payment.
+    subscription:
+      id: openai_tier2
+      provider: openai
+      product: openai-api
+      plan: tier2
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_usd: 500.0
+
+  - id: openai_tier3
+    display_name: OpenAI API Tier 3
+    source_url: https://platform.openai.com/docs/guides/rate-limits
+    notes: After $100 paid and 7 days since first payment.
+    subscription:
+      id: openai_tier3
+      provider: openai
+      product: openai-api
+      plan: tier3
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_usd: 1000.0
+
+  - id: chatgpt_plus_personal
+    display_name: ChatGPT Plus
+    source_url: https://openai.com/chatgpt/pricing/
+    notes: Not locally trackable in v0.1 (web-only). Included so the UI can show it as INFERRED when users manually log usage.
+    subscription:
+      id: chatgpt_plus_personal
+      provider: openai
+      product: chatgpt-web
+      plan: plus
+      account_id: default
+      windows:
+        - window_type: rolling_5h
+          limit_messages: 80
+
+  - id: cursor_pro_personal
+    display_name: Cursor Pro
+    source_url: https://cursor.com/pricing
+    notes: Monthly premium-model request allowance for individual Pro.
+    subscription:
+      id: cursor_pro_personal
+      provider: cursor
+      product: cursor-ide
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_messages: 500
+
+  - id: perplexity_pro_personal
+    display_name: Perplexity Pro
+    source_url: https://www.perplexity.ai/hub/faq/what-is-perplexity-pro
+    notes: Pro Searches and Deep Research are daily-quotaed; not trackable locally (web-only) in v0.1.
+    subscription:
+      id: perplexity_pro_personal
+      provider: perplexity
+      product: perplexity-web
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: daily
+          limit_messages: 300

@@ -83,9 +83,9 @@ flowchart LR
 ### Day 3 (Wed, ~5 hrs) — Schema + DB
 
 - [x] `src/tokie_cli/schema.py`: `UsageEvent`, `Confidence`, `WindowType`, `Subscription`, `LimitWindow`.
-- [ ] `src/tokie_cli/db.py`: SQLite bootstrap, schema migration v1, dedup by `raw_hash`.
-- [ ] `src/tokie_cli/windows.py`: rolling-5h / daily / weekly / monthly math. Unit-tested.
-- [ ] Seed `plans.yaml` with Claude Pro/Max, OpenAI tier 1–3, Anthropic API.
+- [x] `src/tokie_cli/db.py`: SQLite bootstrap, schema migration v1, dedup by `raw_hash`.
+- [x] `src/tokie_cli/windows.py`: rolling-5h / daily / weekly / monthly math. Unit-tested.
+- [x] Seed `plans.yaml` with Claude Pro/Max, OpenAI tier 1–3, Anthropic API (plus ChatGPT Plus, Cursor Pro, Perplexity Pro — 10 entries total).
 
 ### Day 4 (Thu, ~5 hrs) — Collectors + CLI
 
