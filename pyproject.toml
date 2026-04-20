@@ -1,0 +1,123 @@
+[project]
+name = "tokie-cli"
+version = "0.1.0.dev0"
+description = "Local-first CLI and dashboard that tracks token usage and subscription quotas across every AI tool you pay for."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Tokie contributors" }]
+keywords = ["ai", "llm", "tokens", "usage", "claude", "cursor", "openai", "quota", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "rich>=13.7",
+    "textual>=0.60",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "keyring>=25.0",
+    "desktop-notifier>=6.0",
+    "platformdirs>=4.2",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+dev = [
+    "pytest>=8.1",
+    "pytest-asyncio>=0.23",
+    "pytest-recording>=0.13",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "types-pyyaml",
+]
+
+[project.scripts]
+tokie = "tokie_cli.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/tokie-dev/tokie"
+Documentation = "https://github.com/tokie-dev/tokie#readme"
+Issues = "https://github.com/tokie-dev/tokie/issues"
+Changelog = "https://github.com/tokie-dev/tokie/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tokie_cli"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/tokie_cli",
+    "plans.yaml",
+    "task_routing.yaml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle / pyflakes
+    "I",              # isort
+    "B",              # flake8-bugbear
+    "UP",             # pyupgrade
+    "SIM",            # flake8-simplify
+    "RUF",            # ruff-specific
+    "N",              # naming
+    "S",              # bandit (security)
+]
+ignore = [
+    "S101",  # assert used (fine in tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "N802"]
+"scripts/**/*.py" = ["S"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["desktop_notifier.*", "keyring.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+markers = [
+    "network: test requires network access (skipped in default CI)",
+    "integration: end-to-end integration test",
+]
+asyncio_mode = "auto"

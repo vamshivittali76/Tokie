@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+.installed.cfg
+*.manifest
+*.spec
+
+# Virtual envs / tooling
+.venv/
+venv/
+env/
+.env
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+
+# uv
+.uv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tokie runtime artifacts
+.tokie/
+tokie.db
+tokie.db-journal
+tokie.db-wal
+tokie.db-shm
+audit.log
+*.session
+
+# Local discovery output (Phase 0)
+scripts/output/
