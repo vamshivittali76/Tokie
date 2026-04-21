@@ -73,6 +73,7 @@ Design docs:
 
 - [TOKIE_DEVELOPMENT_PLAN_FINAL.md](TOKIE_DEVELOPMENT_PLAN_FINAL.md) — the *what and why* (architecture, schema, scope decisions)
 - [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) — the *when* (6-week sprint, weekly releases)
+- [docs/CONNECTORS.md](docs/CONNECTORS.md) — write your own collector, wire the MCP server into Claude Code / Cursor / Codex
 
 ## Roadmap
 

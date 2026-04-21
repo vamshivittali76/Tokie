@@ -1,0 +1,38 @@
+[project]
+name = "tokie-connector-acme"
+version = "0.1.0"
+description = "Example Tokie connector — rename everything before publishing."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Your Name" }]
+dependencies = [
+    # Pin against the oldest Tokie release whose Collector contract you
+    # are tested against. Bumping here is a breaking change for users.
+    "tokie-cli>=0.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.1",
+    "pytest-asyncio>=0.23",
+]
+
+# This is the whole plumbing — Tokie finds your collector by loading
+# every object registered under ``tokie.collectors``. The key becomes a
+# stable CLI name; the value points at the Collector class.
+[project.entry-points."tokie.collectors"]
+acme = "acme_connector.collector:AcmeCollector"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/acme_connector"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra"
+testpaths = ["tests"]
+asyncio_mode = "auto"

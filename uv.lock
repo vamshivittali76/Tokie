@@ -1442,7 +1442,7 @@ wheels = [
 
 [[package]]
 name = "tokie-cli"
-version = "0.4.0"
+version = "1.0.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "desktop-notifier" },
@@ -1462,6 +1462,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "mcp" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -1481,6 +1482,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "keyring", specifier = ">=25.0" },
+    { name = "mcp", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "platformdirs", specifier = ">=4.2" },

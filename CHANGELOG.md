@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0rc1] — 2026-04-21
+
+Week 5 of the build-in-public run: turn Tokie from a one-team app into a
+platform. Third parties can now ship their own collectors as installable
+packages, and AI agents (Claude Code, Cursor, Codex) can query Tokie's
+view of your subscriptions directly via the Model Context Protocol. No
+core changes required to extend either surface.
+
+### Added
+- **Entry-point collector discovery**
+  (`src/tokie_cli/collectors/registry.py`): third parties publish a
+  package that registers a `tokie.collectors` entry point and Tokie picks
+  it up on the next invocation. Built-in collectors win on name
+  collision (prevents a rogue package from shadowing `claude-code`), and
+  malformed entry points surface as visible `CollectorRegistrationError`
+  messages instead of silent no-ops. `tokie` CLI commands now resolve
+  collectors through this registry, so the hardcoded dispatch table is
+  gone.
+- **`pytest-tokie-connector` contract plugin**
+  (`src/tokie_cli/testing/contract.py`): shipped as a `pytest11` entry
+  point, so any project with `tokie-cli` and `pytest` in its dev deps
+  automatically gets `assert_collector_contract`,
+  `assert_event_is_valid`, `assert_scan_yields_valid_events`, and
+  `assert_idempotent_rescan`. Raises a subclass of `AssertionError`
+  (`ContractViolationError`) with a precise, actionable message —
+  connector authors learn what's wrong without reading the framework's
+  source.
+- **Connector template** (`templates/tokie-connector-example/`): a
+  copy-and-paste-ready example package showing the full `Collector`
+  contract (`detect`, `scan`, `make_event`), correct `pyproject.toml`
+  entry-point wiring, and matching contract tests. No `cookiecutter`
+  dependency — `cp -R` is the workflow.
+- **MCP server** (`src/tokie_cli/mcp_server/`): optional stdio transport
+  exposing four read-only tools to LLM agents:
+  - `list_subscriptions` — every configured subscription with current
+    saturation and reset times.
+  - `get_usage` — aggregated tokens/messages/cost, optionally filtered
+    by `plan_id` or `account_id`.
+  - `get_remaining` — per-window remaining capacity for every
+    subscription.
+  - `suggest_tool` — deterministic recommendation for a task id, plus
+    auto-handoff when over limit (same logic as `tokie suggest`).
+
+  Business logic lives in `handlers.py` as pure functions so it's
+  unit-testable without the MCP SDK. `server.py` adapts those handlers
+  to the `mcp` Python SDK and is the only place that imports it.
+- **`tokie mcp` CLI subcommand**: `tokie mcp serve` starts the stdio
+  server; `tokie mcp tools` prints the tool catalog as JSON (useful for
+  debugging agent integrations without starting a real session). The
+  `mcp` package is an optional install (`pip install 'tokie-cli[mcp]'`)
+  and a missing dependency produces an actionable `MCPNotInstalledError`
+  instead of an import traceback.
+- **`docs/CONNECTORS.md`**: end-to-end guide for writing connectors
+  (contract, template workflow, testing with the pytest plugin) and
+  wiring Tokie's MCP server into Claude Desktop / Claude Code, Cursor,
+  and Codex CLI — with copy-paste config snippets and a troubleshooting
+  section.
+
+### Changed
+- `tokie_cli.cli` resolves built-in and third-party collectors through
+  the shared registry instead of an internal dispatch table. Behaviour
+  is unchanged for every built-in collector.
+
+### Security
+- The MCP server is read-only by design: no tool writes to `tokie.toml`,
+  `tokie.db`, or the OS keyring, and no tool makes a network call. Stdio
+  transport means only the process that spawned the server can talk to
+  it — there's no TCP port to expose.
+
+### Notes for connector authors
+- The public extension surface is `tokie_cli.collectors` (registry +
+  `Collector` base) and `tokie_cli.testing` (contract helpers). Stay on
+  those modules and you won't break on future releases.
+
 ## [0.4.0] — 2026-04-20
 
 Week 4 of the build-in-public run: turn Tokie from a passive tracker into

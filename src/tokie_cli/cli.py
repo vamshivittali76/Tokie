@@ -28,17 +28,12 @@ from rich.table import Table
 
 from tokie_cli import __version__
 from tokie_cli.alerts import AlertRunResult, check_alerts
-from tokie_cli.collectors import Collector
-from tokie_cli.collectors.api_anthropic import AnthropicAPICollector
-from tokie_cli.collectors.api_gemini import GeminiAPICollector
-from tokie_cli.collectors.api_openai import OpenAIAPICollector
+from tokie_cli.collectors import (
+    Collector,
+    discover_third_party,
+    load_registry,
+)
 from tokie_cli.collectors.api_openai_compatible import OpenAICompatibleCollector
-from tokie_cli.collectors.claude_code import ClaudeCodeCollector
-from tokie_cli.collectors.codex import CodexCollector
-from tokie_cli.collectors.copilot_cli import CopilotCLICollector
-from tokie_cli.collectors.cursor_ide import CursorIDECollector
-from tokie_cli.collectors.manual import ManualCollector
-from tokie_cli.collectors.perplexity_api import PerplexityAPICollector
 from tokie_cli.config import (
     CollectorConfig,
     config_dir,
@@ -61,18 +56,16 @@ app = typer.Typer(
 console = Console()
 err_console = Console(stderr=True)
 
-_COLLECTOR_REGISTRY: dict[str, type[Collector]] = {
-    ClaudeCodeCollector.name: ClaudeCodeCollector,
-    CodexCollector.name: CodexCollector,
-    AnthropicAPICollector.name: AnthropicAPICollector,
-    OpenAIAPICollector.name: OpenAIAPICollector,
-    GeminiAPICollector.name: GeminiAPICollector,
-    OpenAICompatibleCollector.name: OpenAICompatibleCollector,
-    CopilotCLICollector.name: CopilotCLICollector,
-    PerplexityAPICollector.name: PerplexityAPICollector,
-    CursorIDECollector.name: CursorIDECollector,
-    ManualCollector.name: ManualCollector,
-}
+def _collector_registry() -> dict[str, type[Collector]]:
+    """Return the current merged collector registry.
+
+    Built-ins + any ``tokie.collectors`` entry points from installed
+    plugin packages. Called fresh per command so a plugin installed via
+    ``uv pip install`` in the current virtualenv becomes visible without
+    a Tokie restart.
+    """
+
+    return load_registry()
 
 
 def _build_collector(name: str) -> Collector:
@@ -85,9 +78,10 @@ def _build_collector(name: str) -> Collector:
     Raises :class:`typer.BadParameter` if the name is unknown.
     """
 
-    cls = _COLLECTOR_REGISTRY.get(name)
+    registry = _collector_registry()
+    cls = registry.get(name)
     if cls is None:
-        valid = ", ".join(sorted(_COLLECTOR_REGISTRY))
+        valid = ", ".join(sorted(registry))
         raise typer.BadParameter(
             f"unknown collector {name!r}. Valid: {valid}.", param_hint="--collector"
         )
@@ -179,7 +173,7 @@ def init(
 
     cfg = default_config()
     detected: list[str] = []
-    for name, cls in _COLLECTOR_REGISTRY.items():
+    for name, cls in _collector_registry().items():
         try:
             is_detected = cls.detect()
         except Exception:  # pragma: no cover - never let detect crash init
@@ -215,8 +209,11 @@ def doctor(
 ) -> None:
     """Probe every registered collector and report detection + readiness."""
 
+    registry = _collector_registry()
+    third_party = discover_third_party()
     rows: list[dict[str, Any]] = []
-    for name, cls in _COLLECTOR_REGISTRY.items():
+    for name, cls in registry.items():
+        source = "plugin" if name in third_party else "builtin"
         try:
             instance: Collector | None = None if cls is OpenAICompatibleCollector else cls()
             detected = cls.detect()
@@ -225,6 +222,7 @@ def doctor(
                 rows.append(
                     {
                         "collector": name,
+                        "source": source,
                         "detected": detected,
                         "ok": health.ok,
                         "message": health.message,
@@ -235,6 +233,7 @@ def doctor(
                 rows.append(
                     {
                         "collector": name,
+                        "source": source,
                         "detected": detected,
                         "ok": detected,
                         "message": "requires TOKIE_OPENAI_COMPAT_LOG to construct",
@@ -245,6 +244,7 @@ def doctor(
             rows.append(
                 {
                     "collector": name,
+                    "source": source,
                     "detected": False,
                     "ok": False,
                     "message": f"{type(exc).__name__}: {exc}",
@@ -258,13 +258,19 @@ def doctor(
 
     table = Table(title="Tokie doctor", show_header=True, header_style="bold")
     table.add_column("collector")
+    table.add_column("source")
     table.add_column("detected")
     table.add_column("ok")
     table.add_column("message")
     for row in rows:
         detected_str = "[green]yes[/green]" if row["detected"] else "[dim]no[/dim]"
         ok_str = "[green]yes[/green]" if row["ok"] else "[yellow]no[/yellow]"
-        table.add_row(row["collector"], detected_str, ok_str, row["message"])
+        source_str = (
+            "[cyan]plugin[/cyan]" if row["source"] == "plugin" else "[dim]builtin[/dim]"
+        )
+        table.add_row(
+            row["collector"], source_str, detected_str, ok_str, row["message"]
+        )
     console.print(table)
 
 
@@ -320,7 +326,7 @@ def scan(
     if collector:
         names = collector
     else:
-        names = [c.name for c in cfg.collectors if c.enabled] or list(_COLLECTOR_REGISTRY)
+        names = [c.name for c in cfg.collectors if c.enabled] or list(_collector_registry())
 
     instances: list[Collector] = []
     for name in names:
@@ -590,6 +596,60 @@ alerts_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(alerts_app)
+
+
+mcp_app = typer.Typer(
+    name="mcp",
+    help="Model Context Protocol server — expose usage/remaining/suggest tools to AI agents.",
+    no_args_is_help=True,
+)
+app.add_typer(mcp_app)
+
+
+@mcp_app.command("serve")
+def mcp_serve() -> None:
+    """Start the Tokie MCP server over stdio (blocks until disconnect).
+
+    Point Claude Desktop / Claude Code / Cursor at ``tokie mcp serve``
+    in their MCP configuration to give the agent read-only access to
+    your subscription status. Requires the optional ``mcp`` extra:
+    ``pip install 'tokie-cli[mcp]'``.
+    """
+
+    from tokie_cli.mcp_server.server import (
+        MCPNotInstalledError,
+        run_stdio,
+    )
+
+    try:
+        run_stdio()
+    except MCPNotInstalledError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except KeyboardInterrupt:
+        err_console.print("[dim]mcp server stopped[/dim]")
+
+
+@mcp_app.command("tools")
+def mcp_tools(
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Print the tool catalog the MCP server exposes, without starting it.
+
+    Useful for debugging client integrations: the JSON output is the
+    exact ``Tool`` definition the SDK sends during handshake.
+    """
+
+    from tokie_cli.mcp_server.handlers import (
+        build_tool_catalog,
+    )
+
+    catalog = build_tool_catalog()
+    if as_json:
+        console.print_json(data={"tools": catalog})
+        return
+    for tool in catalog:
+        console.print(f"[bold]{tool['name']}[/bold]  {tool['description']}")
 
 
 def _severity_style(severity: str) -> str:

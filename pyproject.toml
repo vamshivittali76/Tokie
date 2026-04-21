@@ -1,6 +1,6 @@
 [project]
 name = "tokie-cli"
-version = "0.4.0"
+version = "1.0.0rc1"
 description = "Local-first CLI and dashboard that tracks token usage and subscription quotas across every AI tool you pay for."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -68,10 +68,19 @@ dev = [
     "mypy>=1.10",
     "pre-commit>=3.7",
     "types-pyyaml",
+    # Required for the test suite (test_mcp_handlers / test_mcp_server).
+    # Regular users pick it up via `pip install 'tokie-cli[mcp]'`.
+    "mcp>=1.0",
 ]
 
 [project.scripts]
 tokie = "tokie_cli.cli:app"
+
+[project.entry-points.pytest11]
+# Auto-registers :mod:`tokie_cli.testing.contract` as a pytest plugin
+# whenever ``tokie-cli`` is installed. Third-party connector authors get
+# the ``tokie_contract`` / ``tokie_event_contract`` fixtures for free.
+tokie_connector = "tokie_cli.testing.contract"
 
 [project.urls]
 Homepage = "https://github.com/vamshivittali76/Tokie"
@@ -110,6 +119,9 @@ include = [
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Skip the connector starter template — it's meant to be copied and
+# renamed, not linted against this repo's settings.
+extend-exclude = ["templates/"]
 
 [tool.ruff.lint]
 select = [
