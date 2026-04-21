@@ -201,3 +201,58 @@ def test_no_args_shows_help(runner: CliRunner) -> None:
     assert result.exit_code == 0 or result.exit_code == 2
     combined = result.stdout + (result.stderr or "")
     assert "tokie" in combined.lower()
+
+
+def test_dashboard_rejects_non_loopback_without_remote(runner: CliRunner) -> None:
+    result = runner.invoke(app, ["dashboard", "--host", "0.0.0.0", "--no-open"])
+    assert result.exit_code == 2
+    combined = result.stdout + (result.stderr or "")
+    assert "refusing to bind" in combined.lower()
+
+
+def test_dashboard_starts_server_on_loopback(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    called: dict[str, object] = {}
+
+    def fake_run(
+        host: str = "127.0.0.1",
+        port: int = 7878,
+        *,
+        allow_remote: bool = False,
+        config: object | None = None,
+    ) -> None:
+        called.update(host=host, port=port, allow_remote=allow_remote)
+
+    monkeypatch.setattr("tokie_cli.dashboard.server.run", fake_run)
+    runner.invoke(app, ["init"])
+    result = runner.invoke(app, ["dashboard", "--host", "127.0.0.1", "--port", "7878", "--no-open"])
+    assert result.exit_code == 0, result.stdout
+    assert called["host"] == "127.0.0.1"
+    assert called["port"] == 7878
+    assert called["allow_remote"] is False
+
+
+def test_dashboard_remote_flag_prints_warning(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_run(**kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr("tokie_cli.dashboard.server.run", fake_run)
+    runner.invoke(app, ["init"])
+    result = runner.invoke(
+        app,
+        [
+            "dashboard",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000",
+            "--remote",
+            "--no-open",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    combined = result.stdout + (result.stderr or "")
+    assert "non-loopback" in combined.lower() or "no auth" in combined.lower()

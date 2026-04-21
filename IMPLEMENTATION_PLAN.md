@@ -103,12 +103,18 @@ flowchart LR
 - [x] `cli.py`: Typer app with `version`, `paths`, `init`, `doctor`, `scan`, `status`, `plans` commands. All support `--json` for scripting. Verified end-to-end against real `~/.claude` data.
 - [x] 204 tests passing (up from 72), mypy --strict clean on 31 modules, ruff clean.
 
-### Day 5 (Fri, ~5 hrs) — Dashboard + ship
+### Day 4 — Dashboard ✅ delivered
 
-- [ ] `dashboard/server.py`: FastAPI, bind `127.0.0.1:7878`, `--host/--port/--remote` flags.
-- [ ] One HTMX page: subscription cards + recent sessions table + daily bar chart (Chart.js via CDN).
-- [ ] `tokie dashboard` command opens the browser.
-- [ ] README with honest scope paragraph (web chat = INFERRED).
+- [x] `dashboard/aggregator.py`: pure-function layer. Windows math + shared-bucket logic + weakest-confidence rollup + WEB_ONLY_MANUAL confidence downgrade + per-`account_id` isolation.
+- [x] `dashboard/server.py`: FastAPI, default bind `127.0.0.1:7878`. Endpoints `GET /api/{health,status,subscriptions,events,daily}` and `GET /`. `run()` refuses non-loopback without `allow_remote=True`.
+- [x] `dashboard/templates/index.html`: single-page HTMX + Alpine + Tailwind + Chart.js. Confidence tiers → solid / striped / dashed bars. pct_used → emerald → amber → red at 75/95/100%. Auto-refresh every 10 s.
+- [x] `tokie dashboard` CLI command with `--host` / `--port` / `--remote` / `--open/--no-open`. Opens browser on loopback; prints red `refusing to bind` on remote without `--remote`, amber `no auth yet` warning with `--remote`.
+- [x] Wheel hygiene: templates + static + manual_templates + `plans.yaml` verified to ship inside the wheel exactly once.
+- [x] 27 new tests (13 aggregator + 11 server + 3 CLI). Suite now at **231 passing, 3 skipped**, ruff clean, `mypy --strict` clean on 36 modules.
+
+### Day 5 (Fri, ~3 hrs) — Ship v0.1.0
+
+- [ ] README with honest scope paragraph (web chat = INFERRED) and dashboard screenshot.
 - [ ] `uv build` + `uv publish` to TestPyPI → verify install on a clean venv → promote to PyPI.
 - [ ] Build-in-public update: GIF of `tokie dashboard` showing real usage.
 

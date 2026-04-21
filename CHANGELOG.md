@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 4 — localhost dashboard)
+- `src/tokie_cli/dashboard/aggregator.py`: pure-function layer that turns raw events + bundled plan templates + user-bound `SubscriptionBinding`s into dashboard view-models. Respects `shared_with` for Claude Pro's multi-product buckets, anchors rolling-5h and weekly windows on the first event inside the lookback, enforces per-`account_id` isolation, and downgrades confidence to `INFERRED` for any `web_only_manual` plan regardless of what the event claims.
+- `src/tokie_cli/dashboard/server.py`: FastAPI app with `AppState` dependency-injection seam, endpoints `GET /api/health`, `/api/status`, `/api/subscriptions`, `/api/events`, `/api/daily`, and `GET /` for the HTML. `run()` refuses non-loopback binds without an explicit `allow_remote=True`.
+- `src/tokie_cli/dashboard/templates/index.html`: single-page HTMX + Alpine.js + Tailwind CSS + Chart.js dashboard (zero build step, all CDN). Confidence tiers drive bar styling — exact/solid, estimated/striped, inferred/dashed outline — and pct_used drives the emerald → amber → red color ramp at 75/95/100%. Auto-refreshes every 10 s.
+- `src/tokie_cli/cli.py`: new `tokie dashboard` command with `--host`, `--port`, `--remote`, and `--open/--no-open` flags. Opens the default browser on loopback binds; prints a red `refusing to bind` error (exit 2) and an amber `non-loopback … no auth yet` warning on remote binds.
+- 27 new tests (13 aggregator, 11 server, 3 CLI) bringing the suite to **231 passing, 3 skipped**.
+
+### Changed
+- `pyproject.toml`: per-file `B008` ignore extended to `src/tokie_cli/dashboard/server.py` (FastAPI `Depends()` in defaults is idiomatic, same as Typer `Option()`).
+
+### Security
+- Dashboard defaults to `127.0.0.1:7878`. Non-loopback binds require both `tokie dashboard --remote` and `allow_remote=True` at the library layer — two independent guards.
+- The HTML payload never embeds absolute filesystem paths (contract-tested).
+- HTTP access logs run at `WARNING` by default; nothing about request bodies or prompt content is logged.
+
 ### Added (Day 3 — collectors, CLI, expanded plan catalog)
 - `src/tokie_cli/collectors/base.py`: `Collector` ABC with `detect` / `scan` / `watch` / `health` contract, `CollectorHealth` dataclass, `CollectorError`, and a shared `make_event` helper that stamps `id` + `collected_at`.
 - `src/tokie_cli/config.py`: immutable `TokieConfig` with `platformdirs`-based paths, TOML roundtrip (`tomli-w`), `TOKIE_CONFIG_HOME` / `TOKIE_DATA_HOME` overrides, 0600 perms on POSIX. Secrets never land in the file.

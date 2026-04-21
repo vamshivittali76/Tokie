@@ -42,6 +42,24 @@ The PyPI package is `tokie-cli` (the bare `tokie` slot is squatted by an unrelat
 
 Tokie never silently averages `exact` and `inferred` data. If it can't track something honestly, the UI says so.
 
+## Dashboard
+
+```bash
+tokie dashboard              # 127.0.0.1:7878, opens your browser
+tokie dashboard --port 9000  # custom port (still loopback)
+tokie dashboard --remote     # explicit opt-in for non-loopback bind
+```
+
+Every quota window renders with its own confidence tier:
+
+- **solid bar** → `exact` (parsed from a local session log or pulled from a vendor admin API)
+- **diagonal stripes** → `estimated` (reasonable math over the source data)
+- **dashed outline** → `inferred` (web-only tool; you logged it manually via `tokie scan --collector manual`)
+
+Color ramps emerald → amber → red at 75 / 95 / 100% utilization. Claude Pro's rolling-5h and weekly buckets are rendered as a single bar each because Tokie models the `shared_with` relationship between `claude-code`, `claude-web`, and `claude-desktop`.
+
+Everything stays local. The JSON feed at `/api/status` never leaves your machine.
+
 ## How it's built
 
 Python 3.11+, Typer, FastAPI, SQLite, HTMX + Alpine + Tailwind (no frontend build step), Textual for the live TUI. Collectors plug in via an entry-point SDK — third-party connectors ship as `tokie-connector-*` on PyPI.

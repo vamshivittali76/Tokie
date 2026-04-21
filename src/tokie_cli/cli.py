@@ -479,6 +479,75 @@ def plans(
     console.print(table)
 
 
+@app.command()
+def dashboard(
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Interface to bind. Use 127.0.0.1 (default) to stay loopback-only.",
+    ),
+    port: int = typer.Option(7878, "--port", help="TCP port to bind."),
+    remote: bool = typer.Option(
+        False,
+        "--remote",
+        help="Required to bind any non-loopback host. Prints a security warning.",
+    ),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help="Open the default browser once the server is listening.",
+    ),
+) -> None:
+    """Start the localhost dashboard at ``http://{host}:{port}``.
+
+    Binds to loopback by default; ``--remote`` must be passed to bind any
+    non-loopback interface and will print a visible warning when it does.
+    """
+
+    from tokie_cli.dashboard.server import run as run_server
+
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    if host not in loopback:
+        if not remote:
+            err_console.print(
+                f"[red]refusing to bind {host!r} without --remote[/red]\n"
+                "use '--remote' explicitly if you really want non-loopback access."
+            )
+            raise typer.Exit(code=2)
+        err_console.print(
+            f"[yellow]binding {host}:{port} (non-loopback). "
+            "Tokie has no auth layer yet — do not expose to untrusted networks.[/yellow]"
+        )
+
+    cfg = load_config()
+    cfg_with_bind = cfg.__class__(
+        db_path=cfg.db_path,
+        audit_log_path=cfg.audit_log_path,
+        dashboard_host=host,
+        dashboard_port=port,
+        collectors=cfg.collectors,
+        subscriptions=cfg.subscriptions,
+    )
+
+    console.print(f"[green]tokie dashboard[/green] -> http://{host}:{port}  (Ctrl-C to stop)")
+    if open_browser and host in loopback:
+        import threading
+        import webbrowser
+
+        def _open() -> None:
+            import time
+
+            time.sleep(0.8)
+            webbrowser.open(f"http://{host}:{port}")
+
+        threading.Thread(target=_open, daemon=True).start()
+
+    try:
+        run_server(host=host, port=port, allow_remote=remote, config=cfg_with_bind)
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        console.print("[dim]dashboard stopped[/dim]")
+
+
 def _parse_iso(value: str) -> datetime | None:
     """Parse ``value`` as a tz-aware ISO-8601 datetime, or return ``None``.
 

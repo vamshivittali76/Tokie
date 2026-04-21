@@ -63,6 +63,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tokie_cli"]
+# Hatchling bundles every file in the package tree by default, so the
+# manual_templates, dashboard/templates, and dashboard/static subdirs
+# come along for free without needing explicit force-include entries.
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -98,6 +101,7 @@ ignore = [
 "tests/**/*.py" = ["S", "N802"]
 "scripts/**/*.py" = ["S"]
 "src/tokie_cli/cli.py" = ["B008"]  # typer.Option() in defaults is idiomatic
+"src/tokie_cli/dashboard/server.py" = ["B008"]  # FastAPI Depends() in defaults is idiomatic
 
 [tool.ruff.format]
 quote-style = "double"

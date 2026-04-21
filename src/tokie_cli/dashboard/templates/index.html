@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tokie — localhost dashboard</title>
+  <meta name="color-scheme" content="dark light" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Confidence-tier visuals — matches TOKIE_DEVELOPMENT_PLAN_FINAL §4.
+       exact -> solid, estimated -> diagonal stripes, inferred -> dashed outline. */
+    .bar-fill-exact    { background: currentColor; }
+    .bar-fill-estimated{
+      background-image: repeating-linear-gradient(
+        45deg, currentColor 0, currentColor 6px, transparent 6px, transparent 12px
+      );
+      background-color: rgba(255,255,255,0.05);
+    }
+    .bar-fill-inferred {
+      border: 2px dashed currentColor;
+      background: transparent;
+      box-sizing: border-box;
+    }
+    .ring-exact    { --ring-rgb: 52 211 153;   color: rgb(52 211 153); }   /* emerald-400 */
+    .ring-estimated{ --ring-rgb: 251 191 36;   color: rgb(251 191 36); }   /* amber-400 */
+    .ring-inferred { --ring-rgb: 148 163 184;  color: rgb(148 163 184); }  /* slate-400 */
+
+    /* Minimal animations so the polling refresh is not jarring. */
+    .fade-in { animation: fade 0.3s ease; }
+    @keyframes fade { from { opacity: 0.6 } to { opacity: 1 } }
+  </style>
+</head>
+<body class="h-full text-slate-100 font-sans antialiased">
+  <div
+    x-data="tokieDashboard()"
+    x-init="init()"
+    class="min-h-full flex flex-col"
+  >
+    <!-- ============================ HEADER ============================ -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center font-bold text-slate-950">T</div>
+          <div>
+            <h1 class="text-lg font-semibold tracking-tight">Tokie</h1>
+            <p class="text-xs text-slate-400">
+              {{ bind }} &middot; v{{ version }} &middot;
+              <span x-text="lastUpdated"></span>
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            @click="refresh()"
+            class="px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700"
+          >
+            <span x-show="!loading">Refresh</span>
+            <span x-show="loading">Refreshing…</span>
+          </button>
+          <label class="flex items-center gap-2 text-xs text-slate-400">
+            <input type="checkbox" x-model="autoRefresh" class="accent-emerald-500" />
+            auto-refresh
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============================ MAIN ============================ -->
+    <main class="max-w-7xl mx-auto w-full px-6 py-6 flex-1 space-y-6">
+
+      <!-- Empty state -->
+      <template x-if="!hasAnyData">
+        <section class="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-center">
+          <h2 class="text-xl font-semibold mb-2">No usage yet</h2>
+          <p class="text-slate-400 text-sm max-w-xl mx-auto">
+            Run <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie init</code> to enable
+            detected collectors, then <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie scan</code>
+            to ingest your usage. Refresh this page after — or toggle auto-refresh above.
+          </p>
+        </section>
+      </template>
+
+      <!-- ============================ SUBSCRIPTIONS ============================ -->
+      <section x-show="payload.subscriptions?.length" class="space-y-3 fade-in">
+        <div class="flex items-end justify-between">
+          <h2 class="text-lg font-semibold">Subscriptions</h2>
+          <p class="text-xs text-slate-400">
+            <span x-text="payload.subscription_count"></span> configured
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <template x-for="sub in payload.subscriptions" :key="sub.plan_id + '@' + sub.account_id">
+            <article
+              :class="'rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4 ring-' + sub.confidence"
+            >
+              <header class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold text-slate-100" x-text="sub.display_name"></h3>
+                  <p class="text-xs text-slate-400">
+                    <span x-text="sub.provider"></span> &middot;
+                    <span x-text="sub.product"></span> &middot;
+                    <span x-text="sub.account_id"></span>
+                  </p>
+                </div>
+                <div class="flex flex-col items-end gap-1">
+                  <span
+                    class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
+                    :class="trackabilityClass(sub.trackability)"
+                    x-text="sub.trackability.replace('_', ' ')"
+                  ></span>
+                  <span
+                    class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
+                    :class="confidenceClass(sub.confidence)"
+                    x-text="sub.confidence"
+                  ></span>
+                </div>
+              </header>
+
+              <template x-for="w in sub.windows">
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="text-slate-300 font-medium">
+                      <span x-text="formatWindowType(w.window_type)"></span>
+                      <template x-if="w.shared_with?.length > 1">
+                        <span class="text-slate-500">(shared)</span>
+                      </template>
+                    </span>
+                    <span class="text-slate-400">
+                      <span x-text="formatUsage(w)"></span>
+                      <template x-if="w.resets_at">
+                        <span class="ml-2 text-slate-500">
+                          resets <span x-text="relativeTime(w.resets_at)"></span>
+                        </span>
+                      </template>
+                    </span>
+                  </div>
+                  <div class="h-2.5 rounded-full overflow-hidden bg-slate-800 border border-slate-800">
+                    <div
+                      :class="'h-full ' + barFillClass(sub.confidence) + ' ' + barColorClass(w.pct_used)"
+                      :style="`width: ${Math.min((w.pct_used || 0) * 100, 100)}%`"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+
+              <footer class="text-xs text-slate-500 pt-1 border-t border-slate-800">
+                <span x-text="sub.event_count"></span>
+                event<span x-show="sub.event_count !== 1">s</span> contributed
+              </footer>
+            </article>
+          </template>
+        </div>
+      </section>
+
+      <!-- ============================ DAILY CHART ============================ -->
+      <section x-show="hasAnyData" class="space-y-3 fade-in">
+        <h2 class="text-lg font-semibold">Last 14 days</h2>
+        <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <canvas id="daily-chart" class="!max-h-72"></canvas>
+        </div>
+      </section>
+
+      <!-- ============================ RECENT EVENTS ============================ -->
+      <section x-show="payload.recent_events?.length" class="space-y-3 fade-in">
+        <h2 class="text-lg font-semibold">Recent events</h2>
+        <div class="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-900 text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-2 text-left">When</th>
+                <th class="px-4 py-2 text-left">Provider</th>
+                <th class="px-4 py-2 text-left">Product</th>
+                <th class="px-4 py-2 text-left">Model</th>
+                <th class="px-4 py-2 text-right">Tokens</th>
+                <th class="px-4 py-2 text-right">Cost</th>
+                <th class="px-4 py-2 text-left">Conf.</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+              <template x-for="evt in payload.recent_events" :key="evt.source + evt.occurred_at">
+                <tr class="hover:bg-slate-900/50">
+                  <td class="px-4 py-2 text-slate-300" x-text="relativeTime(evt.occurred_at)"></td>
+                  <td class="px-4 py-2 text-slate-400" x-text="evt.provider"></td>
+                  <td class="px-4 py-2 text-slate-400" x-text="evt.product"></td>
+                  <td class="px-4 py-2 text-slate-400 font-mono text-xs" x-text="evt.model"></td>
+                  <td class="px-4 py-2 text-right text-slate-300 tabular-nums" x-text="evt.total_tokens.toLocaleString()"></td>
+                  <td class="px-4 py-2 text-right text-slate-400 tabular-nums" x-text="evt.cost_usd != null ? '$' + evt.cost_usd.toFixed(2) : '—'"></td>
+                  <td class="px-4 py-2">
+                    <span
+                      class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border"
+                      :class="confidenceClass(evt.confidence)"
+                      x-text="evt.confidence"
+                    ></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================ PROVIDER BREAKDOWN ============================ -->
+      <section x-show="payload.provider_breakdown?.length" class="space-y-3 fade-in">
+        <h2 class="text-lg font-semibold">Totals by product</h2>
+        <div class="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-900 text-slate-400 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-2 text-left">Provider</th>
+                <th class="px-4 py-2 text-left">Product</th>
+                <th class="px-4 py-2 text-right">Events</th>
+                <th class="px-4 py-2 text-right">Input</th>
+                <th class="px-4 py-2 text-right">Output</th>
+                <th class="px-4 py-2 text-right">Cache</th>
+                <th class="px-4 py-2 text-right">Cost (USD)</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+              <template x-for="row in payload.provider_breakdown" :key="row.provider + '/' + row.product">
+                <tr>
+                  <td class="px-4 py-2 text-slate-300" x-text="row.provider"></td>
+                  <td class="px-4 py-2 text-slate-400" x-text="row.product"></td>
+                  <td class="px-4 py-2 text-right tabular-nums" x-text="row.events"></td>
+                  <td class="px-4 py-2 text-right tabular-nums" x-text="row.input_tokens.toLocaleString()"></td>
+                  <td class="px-4 py-2 text-right tabular-nums" x-text="row.output_tokens.toLocaleString()"></td>
+                  <td class="px-4 py-2 text-right tabular-nums" x-text="row.cache_read_tokens.toLocaleString()"></td>
+                  <td class="px-4 py-2 text-right tabular-nums" x-text="'$' + (row.cost_usd || 0).toFixed(2)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="border-t border-slate-800 mt-10">
+      <div class="max-w-7xl mx-auto px-6 py-4 text-xs text-slate-500 flex justify-between">
+        <p>
+          Local-first. All data stays on your machine.
+          <a class="hover:text-slate-300 underline underline-offset-2" href="/api/status">JSON</a>
+        </p>
+        <p>
+          Confidence legend:
+          <span class="ml-2 px-1.5 text-emerald-400 border border-emerald-800 rounded">exact</span>
+          <span class="ml-1 px-1.5 text-amber-400 border border-amber-800 rounded">estimated</span>
+          <span class="ml-1 px-1.5 text-slate-400 border border-slate-700 rounded">inferred</span>
+        </p>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    function tokieDashboard() {
+      return {
+        payload: {{ payload_json | safe }},
+        loading: false,
+        autoRefresh: true,
+        lastUpdated: 'just now',
+        chart: null,
+        get hasAnyData() {
+          return (this.payload?.event_count || 0) > 0;
+        },
+        init() {
+          this.renderChart();
+          setInterval(() => {
+            this.lastUpdated = this.humanize(new Date(this.payload.generated_at));
+          }, 30000);
+          setInterval(() => {
+            if (this.autoRefresh) this.refresh();
+          }, 10000);
+        },
+        async refresh() {
+          if (this.loading) return;
+          this.loading = true;
+          try {
+            const res = await fetch('/api/status', { headers: { 'Accept': 'application/json' } });
+            if (res.ok) {
+              this.payload = await res.json();
+              this.lastUpdated = 'just now';
+              this.renderChart();
+            }
+          } catch (_e) { /* ignore transient errors */ }
+          finally { this.loading = false; }
+        },
+        renderChart() {
+          const canvas = document.getElementById('daily-chart');
+          if (!canvas) return;
+          const bars = this.payload.daily_bars || [];
+          const labels = bars.map(b => b.date.slice(5));
+          const input = bars.map(b => b.input_tokens);
+          const output = bars.map(b => b.output_tokens);
+          const cache = bars.map(b => b.cache_read_tokens);
+          const reasoning = bars.map(b => b.reasoning_tokens);
+
+          if (this.chart) this.chart.destroy();
+          this.chart = new Chart(canvas, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [
+                { label: 'Input',     data: input,     backgroundColor: 'rgba(56, 189, 248, 0.8)' },
+                { label: 'Output',    data: output,    backgroundColor: 'rgba(52, 211, 153, 0.8)' },
+                { label: 'Cache',     data: cache,     backgroundColor: 'rgba(148, 163, 184, 0.7)' },
+                { label: 'Reasoning', data: reasoning, backgroundColor: 'rgba(251, 191, 36, 0.8)' },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { stacked: true, grid: { display: false }, ticks: { color: '#94a3b8' } },
+                y: { stacked: true, grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { color: '#94a3b8' } },
+              },
+              plugins: {
+                legend: { labels: { color: '#cbd5e1' } },
+              },
+            },
+          });
+        },
+        humanize(then) {
+          const diff = Math.max(0, (Date.now() - new Date(then).getTime()) / 1000);
+          if (diff < 10) return 'just now';
+          if (diff < 60) return `${Math.round(diff)}s ago`;
+          if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
+          return `${Math.round(diff / 3600)}h ago`;
+        },
+        relativeTime(iso) { return this.humanize(iso); },
+        formatWindowType(t) {
+          return {
+            rolling_5h: 'Rolling 5 h',
+            daily: 'Daily',
+            weekly: 'Weekly',
+            monthly: 'Monthly',
+            none: 'No cap',
+          }[t] || t;
+        },
+        formatUsage(w) {
+          const used = Math.round(w.used);
+          const limit = w.limit != null ? Math.round(w.limit) : null;
+          const unit = { tokens: 'tokens', messages: 'msgs', usd: '$', none: '' }[w.limit_basis] || '';
+          if (w.limit_basis === 'none' || limit == null) return `${used.toLocaleString()} ${unit}`.trim();
+          if (w.limit_basis === 'usd') return `$${w.used.toFixed(2)} / $${w.limit.toFixed(2)}`;
+          return `${used.toLocaleString()} / ${limit.toLocaleString()} ${unit}`;
+        },
+        confidenceClass(c) {
+          return {
+            exact: 'text-emerald-400 border-emerald-800',
+            estimated: 'text-amber-400 border-amber-800',
+            inferred: 'text-slate-300 border-slate-700',
+          }[c] || 'text-slate-300 border-slate-700';
+        },
+        trackabilityClass(t) {
+          return {
+            local_exact: 'text-emerald-400 border-emerald-800',
+            api_exact: 'text-sky-400 border-sky-800',
+            web_only_manual: 'text-slate-300 border-slate-700',
+          }[t] || 'text-slate-300 border-slate-700';
+        },
+        barFillClass(conf) {
+          return {
+            exact: 'bar-fill-exact',
+            estimated: 'bar-fill-estimated',
+            inferred: 'bar-fill-inferred',
+          }[conf] || 'bar-fill-exact';
+        },
+        barColorClass(pct) {
+          if (pct >= 1.0) return 'text-red-500';
+          if (pct >= 0.95) return 'text-red-400';
+          if (pct >= 0.75) return 'text-amber-400';
+          return 'text-emerald-400';
+        },
+      };
+    }
+  </script>
+</body>
+</html>
