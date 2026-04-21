@@ -515,14 +515,18 @@
   </div>
 
   <script>
+    // Chart.js instances MUST live outside Alpine's reactive proxy.
+    // Alpine deep-proxies every property on the component object; storing a
+    // live Chart instance inside the proxy corrupts Chart's internal state on
+    // the next reactive flush, causing charts to go blank after the first render.
+    const _charts = { daily: null, timeline: null };
+
     function tokieDashboard() {
       return {
         payload: {{ payload_json | safe }},
         loading: false,
         autoRefresh: true,
         lastUpdated: 'just now',
-        chart: null,
-        timelineChart: null,
         theme: 'dark',
         accountFilter: 'all',
         alerts: { banner: [], armed: [], available_channels: ['banner'] },
@@ -607,8 +611,8 @@
           // cache_read_tokens are omitted from this chart — they peak at 10-20M
           // vs ~500K for input+output, completely hiding the active-usage bars.
           // Cache data is still available via the provider breakdown table below.
-          if (this.chart) this.chart.destroy();
-          this.chart = new Chart(canvas, {
+          if (_charts.daily) { _charts.daily.destroy(); _charts.daily = null; }
+          _charts.daily = new Chart(canvas, {
             type: 'bar',
             data: {
               labels,
@@ -654,8 +658,8 @@
           const timeline = this.payload.hourly_timeline || [];
           const labels = timeline.map(h => h.hour.slice(5, 13).replace('T', ' '));
           const totals = timeline.map(h => h.total_tokens);
-          if (this.timelineChart) this.timelineChart.destroy();
-          this.timelineChart = new Chart(canvas, {
+          if (_charts.timeline) { _charts.timeline.destroy(); _charts.timeline = null; }
+          _charts.timeline = new Chart(canvas, {
             type: 'line',
             data: {
               labels,
