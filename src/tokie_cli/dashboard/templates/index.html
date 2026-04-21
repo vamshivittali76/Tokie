@@ -404,7 +404,10 @@
 
       <!-- ============================ DAILY CHART ============================ -->
       <section x-show="hasAnyData" class="space-y-3 fade-in">
-        <h2 class="text-lg font-semibold">Last 14 days</h2>
+        <div class="flex items-baseline gap-3">
+          <h2 class="text-lg font-semibold">Last 14 days</h2>
+          <p class="text-xs text-slate-500">input + output + reasoning tokens &nbsp;·&nbsp; cache reads shown in tooltips only</p>
+        </div>
         <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
           <canvas id="daily-chart" class="!max-h-72"></canvas>
         </div>
@@ -540,8 +543,13 @@
             const stored = localStorage.getItem('tokie.theme');
             if (stored === 'light' || stored === 'dark') this.theme = stored;
           } catch (_e) { /* privacy mode */ }
-          this.renderChart();
-          this.renderTimeline();
+          // Defer chart render until after Alpine has processed x-show directives
+          // and made the canvas elements visible. Calling Chart.js on a
+          // display:none canvas produces a zero-dimension render (blank box).
+          this.$nextTick(() => {
+            this.renderChart();
+            this.renderTimeline();
+          });
           this.refreshAlerts();
           this.refreshThresholds();
           this.refreshRouting();
@@ -558,8 +566,7 @@
         toggleTheme() {
           this.theme = this.theme === 'dark' ? 'light' : 'dark';
           try { localStorage.setItem('tokie.theme', this.theme); } catch (_e) { /* privacy mode */ }
-          this.renderChart();
-          this.renderTimeline();
+          this.$nextTick(() => { this.renderChart(); this.renderTimeline(); });
         },
         formatTpm(tpm) {
           if (tpm == null || !isFinite(tpm)) return '0 tok/min';
@@ -578,8 +585,7 @@
             if (res.ok) {
               this.payload = await res.json();
               this.lastUpdated = 'just now';
-              this.renderChart();
-              this.renderTimeline();
+              this.$nextTick(() => { this.renderChart(); this.renderTimeline(); });
             }
           } catch (_e) { /* ignore transient errors */ }
           finally { this.loading = false; }
@@ -589,32 +595,60 @@
           if (!canvas) return;
           const bars = this.payload.daily_bars || [];
           const labels = bars.map(b => b.date.slice(5));
-          const input = bars.map(b => b.input_tokens);
-          const output = bars.map(b => b.output_tokens);
-          const cache = bars.map(b => b.cache_read_tokens);
+          const input     = bars.map(b => b.input_tokens);
+          const output    = bars.map(b => b.output_tokens);
+          const cache     = bars.map(b => b.cache_read_tokens);
           const reasoning = bars.map(b => b.reasoning_tokens);
 
+          // Cache-read tokens are orders of magnitude larger than input+output
+          // (they represent re-used KV cache, not billed quota) and completely
+          // swamp the scale when stacked together. Render them on a hidden right
+          // axis so they appear in tooltips without distorting the main bars.
           if (this.chart) this.chart.destroy();
           this.chart = new Chart(canvas, {
             type: 'bar',
             data: {
               labels,
               datasets: [
-                { label: 'Input',     data: input,     backgroundColor: 'rgba(56, 189, 248, 0.8)' },
-                { label: 'Output',    data: output,    backgroundColor: 'rgba(52, 211, 153, 0.8)' },
-                { label: 'Cache',     data: cache,     backgroundColor: 'rgba(148, 163, 184, 0.7)' },
-                { label: 'Reasoning', data: reasoning, backgroundColor: 'rgba(251, 191, 36, 0.8)' },
+                { label: 'Input',      data: input,     backgroundColor: 'rgba(56, 189, 248, 0.85)', stack: 'tokens', yAxisID: 'y' },
+                { label: 'Output',     data: output,    backgroundColor: 'rgba(52, 211, 153, 0.85)', stack: 'tokens', yAxisID: 'y' },
+                { label: 'Reasoning',  data: reasoning, backgroundColor: 'rgba(251, 191, 36, 0.85)', stack: 'tokens', yAxisID: 'y' },
+                { label: 'Cache read', data: cache,     backgroundColor: 'rgba(148, 163, 184, 0.25)',
+                  type: 'bar', yAxisID: 'yCache', stack: 'cache', borderWidth: 0 },
               ],
             },
             options: {
               responsive: true,
               maintainAspectRatio: false,
+              interaction: { mode: 'index' },
               scales: {
                 x: { stacked: true, grid: { display: false }, ticks: { color: this.axisColor() } },
-                y: { stacked: true, grid: { color: this.gridColor() }, ticks: { color: this.axisColor() } },
+                y: {
+                  stacked: true,
+                  grid: { color: this.gridColor() },
+                  ticks: {
+                    color: this.axisColor(),
+                    callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v,
+                  },
+                  title: { display: true, text: 'active tokens', color: this.axisColor(), font: { size: 10 } },
+                },
+                yCache: {
+                  display: false,
+                  stacked: false,
+                  grid: { display: false },
+                },
               },
               plugins: {
                 legend: { labels: { color: this.legendColor() } },
+                tooltip: {
+                  callbacks: {
+                    label(ctx) {
+                      const v = ctx.raw || 0;
+                      const fmt = v >= 1e6 ? (v/1e6).toFixed(2)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : v;
+                      return ` ${ctx.dataset.label}: ${fmt}`;
+                    },
+                  },
+                },
               },
             },
           });
