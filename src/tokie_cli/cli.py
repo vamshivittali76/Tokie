@@ -15,6 +15,7 @@ Output policy
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sys
 import time
@@ -60,6 +61,23 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+def _force_utf8_stdio() -> None:
+    """Ensure stdout/stderr use UTF-8 on platforms (mainly Windows cp1252)
+    where Rich's legacy renderer would otherwise raise ``UnicodeEncodeError``
+    on characters like em-dashes in plan names or status banners.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        # Best-effort: if the stream is detached/redirected we fall back to
+        # the default codec and let Rich handle replacement.
+        with contextlib.suppress(OSError, ValueError):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_stdio()
 
 console = Console()
 err_console = Console(stderr=True)
@@ -492,7 +510,7 @@ def status(
         alert_result = None
     if alert_result and alert_result.banner_lines:
         console.print()
-        console.print("[bold yellow]⚠ thresholds armed[/bold yellow]")
+        console.print("[bold yellow]! thresholds armed[/bold yellow]")
         for line in alert_result.banner_lines:
             console.print(f"  [{_severity_style(line.severity)}]{line.text}[/]")
         _render_handoff_hints(cfg, alert_result.armed)

@@ -1,279 +1,519 @@
-# Tokie — Implementation Plan (build-in-public, 6-week sprint)
+# Tokie — Implementation Plan
 
-> Companion to [TOKIE_DEVELOPMENT_PLAN_FINAL.md](TOKIE_DEVELOPMENT_PLAN_FINAL.md). That doc is the *what and why*. This doc is the *when and in what order*, compressed for a build-in-public cadence.
+> **Cross-reference:** This plan operationalises [TOKIE_DEVELOPMENT_PLAN_FINAL.md](TOKIE_DEVELOPMENT_PLAN_FINAL.md).
+> Every section number below cites the matching section in the source spec.
+> The source doc is authoritative for *what* to build; this plan is authoritative for *when*, *how*, and *in what order*.
 
-**Author effort model:** solo, part-time, ~25 hrs/week
-**Total duration:** 6 calendar weeks
-**Release cadence:** one tagged release per week, one public update per week
-**Start:** Week 1, Day 1
-
----
-
-## 1. Build-in-public principles driving the schedule
-
-1. **Ship weekly.** Every Friday a new version is tagged and pushed to PyPI, even if small. No silent weeks.
-2. **Exit-gate commits.** No week ends half-done. If a task slips, cut it before the tag, don't delay the tag.
-3. **Dogfood from day 1.** Install Tokie on the author's own machine starting end of Week 1 and use it daily.
-4. **Demo over docs.** Each weekly update ships a short screencap or screenshot, not a wall of text.
-5. **Post-v1.0 is a cliff.** Browser extension, menu-bar apps, team edition — all deferred. Don't negotiate with scope creep.
+**Status:** Retrospective implementation record (v1.0.0 shipped 2026-04-21).
+**Model:** Solo developer, ~25 hrs/week.
+**Total planned:** 11 calendar weeks, ~240 effort-hours.
+**Actual:** Compressed 6-week sprint at higher daily velocity; all phases completed.
 
 ---
 
-## 2. Timeline at a glance
+## 1. Overview
 
-| Week | Tag | Phase | Theme | Exit demo |
-|------|-----|-------|-------|-----------|
-| 1 | `v0.1.0` | Phase 0 + 1 | Schema, scaffold, core, minimal dashboard | `uv tool install tokie-cli` shows Claude Code usage on `127.0.0.1:7878` |
-| 2 | `v0.2.0` | Phase 2 | Cursor + Gemini + Copilot + Textual TUI | Live TUI with 5 collectors + dashboard v2 (dark mode, burn rate) |
-| 3 | `v0.3.0` | Phase 3 | Threshold alerts | Desktop notification at 75% of Claude Pro weekly cap |
-| 4 | `v0.4.0` | Phase 4 | Recommender + guided handoff | Hit cap → clipboard has continuation prompt + ranked tool list |
-| 5 | `v1.0.0-rc` | Phase 5 | Plugin SDK + MCP server | Claude Code MCP queries `get_remaining` live |
-| 6 | `v1.0.0` | Polish | Docs, SECURITY.md, dogfooding, marketing | Launch post + Hacker News / r/LocalLLaMA |
+### Effort model
 
-Total effort: ~150 hours across 6 weeks at 25 hrs/week.
+| Parameter | Value |
+|---|---|
+| Developer | Solo |
+| Planned velocity | ~25 hrs/week (nominal) |
+| Actual velocity | ~40+ hrs/week (compressed sprint) |
+| Total effort-hours | ~240 hrs planned across 11 weeks |
+| Phases | 6 (Phase 0 – Phase 5) + polish buffer |
+| Release cadence | PyPI tag per phase milestone |
+
+### Ground rules
+
+1. **Exit gates are non-negotiable.** A phase does not close until its gate is met, even if calendar time has elapsed.
+2. **Never let a half-done state persist overnight.** Each session ends with either a passing CI commit or an explicit stash note.
+3. **Confidence tiers are enforced at every layer.** `exact` / `estimated` / `inferred` appear in the schema, the DB, the dashboard rendering, and the `tokie status` output. Mixing them silently is a correctness bug.
+4. **Security model (§12 of spec) is not deferred.** Localhost-only, no telemetry, keyring credentials, and 0600 file permissions ship from day one.
+5. **Plans.yaml is the source of truth for subscription limits.** Hardcoded thresholds anywhere else are a bug.
+
+### Release cadence
+
+| Tag | Phase | Description |
+|---|---|---|
+| `v0.1.0` | Phase 1 | Local core + minimal dashboard |
+| `v0.2.0` | Phase 2 | More collectors + live TUI |
+| `v0.3.0` | Phase 3 | Alert engine |
+| `v0.4.0` | Phase 4 | Task recommender + guided handoff |
+| `v1.0.0-rc1` | Phase 5 | Plugin SDK + MCP server |
+| `v1.0.0` | Polish | Full docs pass, perf pass, dogfooding |
 
 ---
 
-## 3. Dependency graph
+## 2. Dependency graph
+
+### Phase-level critical path
 
 ```mermaid
 flowchart LR
     P0[P0 schema discovery] --> P1core[P1 schema + db + windows]
-    P1core --> P1coll[P1 collectors: Claude Code, Codex, APIs]
-    P1core --> P1dash[P1 FastAPI + minimal HTMX]
-    P1coll --> v01[v0.1.0]
-    P1dash --> v01
-    v01 --> P2coll[P2 Cursor, Gemini, Copilot]
-    v01 --> P2tui[P2 Textual TUI]
-    P2coll --> v02[v0.2.0]
-    P2tui --> v02
-    v02 --> P3[P3 alerts]
-    P3 --> v03[v0.3.0]
-    v03 --> P4rec[P4 recommender]
-    v03 --> P4ho[P4 handoff]
-    P4rec --> v04[v0.4.0]
-    P4ho --> v04
-    v04 --> P5sdk[P5 plugin SDK]
-    v04 --> P5mcp[P5 MCP server]
-    P5sdk --> rc[v1.0.0-rc]
-    P5mcp --> rc
-    rc --> v1[v1.0.0]
+    P1core --> P1coll[P1 collectors: Claude Code · Codex · APIs]
+    P1core --> P1dash[P1 FastAPI + minimal HTMX dashboard]
+    P1coll --> P1rel[v0.1 PyPI]
+    P1dash --> P1rel
+    P1rel --> P2coll[P2 Cursor · Gemini · Copilot collectors]
+    P1rel --> P2tui[P2 Textual live TUI]
+    P2coll --> P2rel[v0.2]
+    P2tui --> P2rel
+    P2rel --> P3[P3 threshold engine + channels]
+    P3 --> P4rec[P4 deterministic recommender]
+    P4rec --> P4hof[P4 guided handoff]
+    P4hof --> P4rel[v0.4]
+    P4rel --> P5sdk[P5 entry-point registry + pytest plugin]
+    P5sdk --> P5mcp[P5 MCP server]
+    P5mcp --> P5rel[v1.0-rc1]
+    P5rel --> polish[Week 11 polish]
+    polish --> v1[v1.0.0]
+```
+
+### Collector sub-graph (which collectors block which milestones)
+
+```mermaid
+flowchart TD
+    subgraph v01["v0.1 (blocking)"]
+        CC[claude-code JSONL]
+        CX[codex JSONL]
+        AA[anthropic-api HTTP]
+        OA[openai-api HTTP]
+        MN[manual CSV/YAML]
+    end
+    subgraph v02["v0.2 (blocking)"]
+        CU[cursor-ide session token]
+        GEM[gemini-cli JSONL]
+        COP[copilot-cli JSONL]
+    end
+    subgraph v02opt["v0.2 (optional / future)"]
+        PX[perplexity-api NDJSON]
+        OC[openai-compat proxy log]
+    end
+    subgraph v10["v1.0 (third-party)"]
+        TP[tokie-connector-* entry points]
+    end
+    CC --> v01
+    CX --> v01
+    AA --> v01
+    OA --> v01
+    MN --> v01
+    v01 --> v02
+    v01 --> v02opt
+    v02 --> v10
 ```
 
 ---
 
-## 4. Week 1 — Foundations + v0.1 (Phases 0 and 1)
+## 3. Phase 0 — Schema discovery
 
-**Budget:** 25 hrs. **Tag:** `v0.1.0` on Friday.
+**Calendar:** Week 1 Mon–Wed | **Budget:** ~15 hrs | **Spec ref:** §10 Phase 0
 
-### Day 1 (Mon, ~5 hrs) — Discovery
+### Tasks
 
-- [ ] `scripts/v00_discover.py`: walk `~/.claude/projects/*.jsonl`, emit daily token totals. Confirms the real JSONL shape.
-- [ ] Repeat for `~/.codex` (or equivalent) — second source to stress the schema.
-- [x] Name check: `tokie` is squatted on both PyPI (unrelated tokenizer, v0.0.8) and npm (v1.1.0). Decision: ship as **`tokie-cli`** on PyPI with import name `tokie_cli`; brand and CLI command stay `tokie`.
-- [ ] Create `C:\Tokie` repo, `git init`, first commit with the plan docs.
+| # | Task | Hours | Deliverable |
+|---|---|---|---|
+| 0.1 | Write throwaway 50-line script: read `~/.claude/projects/*.jsonl`, sum tokens per day, print table | 2 | `scripts/parse_claude.py` (discarded after) |
+| 0.2 | Repeat for one Codex session rollout | 1 | Verified shape B wire format |
+| 0.3 | Finalize `src/tokie_cli/schema.py` — lock `UsageEvent`, `Confidence`, `WindowType` | 4 | Canonical schema |
+| 0.4 | PyPI / npm / GitHub name-collision check for `tokie`, `tokie-cli` | 1 | Decision: use `tokie-cli` on PyPI, `tokie` CLI command |
+| 0.5 | Confirm: Python 3.11+, MIT, CLI/API-only for v0.1, SQLite, Typer, FastAPI | 1 | Committed decisions logged in §13 of spec |
+| 0.6 | Create repo: `pyproject.toml`, `README.md`, `CONTRIBUTING.md`, spec as `TOKIE_DEVELOPMENT_PLAN_FINAL.md` | 3 | GitHub repo with initial push |
+| 0.7 | Wire CI skeleton: ruff + mypy + pytest on empty test, matrix 3.11/3.12/3.13 × macOS/Linux/Windows | 3 | Green badge on `main` |
 
-### Day 2 (Tue, ~5 hrs) — Repo spine
+### Exit gate
 
-- [ ] `pyproject.toml` with `uv`, Typer, FastAPI, Pydantic, Rich, Textual (TUI in W2 but stub the dep), SQLite via stdlib.
-- [ ] Directory layout per §14 of the source doc.
-- [ ] `ruff.toml`, `mypy.ini` (`--strict`), `pre-commit` hooks.
-- [ ] `.github/workflows/ci.yml`: matrix 3.11/3.12/3.13 × macOS/Linux/Windows. Green on empty.
-
-### Day 3 (Wed, ~5 hrs) — Schema + DB
-
-- [x] `src/tokie_cli/schema.py`: `UsageEvent`, `Confidence`, `WindowType`, `Subscription`, `LimitWindow`.
-- [x] `src/tokie_cli/db.py`: SQLite bootstrap, schema migration v1, dedup by `raw_hash`.
-- [x] `src/tokie_cli/windows.py`: rolling-5h / daily / weekly / monthly math. Unit-tested.
-- [x] Seed `plans.yaml` with Claude Pro/Max, OpenAI tier 1–3, Anthropic API (plus ChatGPT Plus, Cursor Pro, Perplexity Pro — 10 entries total).
-
-### Day 4 (Thu, ~5 hrs) — Collectors + CLI  ✅ delivered Day 3
-
-- [x] `collectors/base.py`: `Collector` ABC per §8, `CollectorHealth`, `make_event` helper, default `watch` polling.
-- [x] `config.py`: `TokieConfig`, platformdirs paths, TOML roundtrip via `tomli-w`, env-var overrides, 0600 perms on POSIX.
-- [x] `collectors/claude_code.py`: JSONL session parser with env-var root override. Confidence.EXACT.
-- [x] `collectors/codex.py`: parses both old (chat-completions) and new (responses-API) rollout shapes. Confidence.EXACT.
-- [x] `collectors/api_anthropic.py`: Admin usage-report endpoint, keyring auth, pagination + retry. Confidence.EXACT.
-- [x] `collectors/api_openai.py`: `/v1/organization/usage/completions`, keyring auth, Bearer header. Confidence.EXACT.
-- [x] `collectors/api_gemini.py`: local NDJSON tailer (Google has no usage endpoint); handles `thoughtsTokenCount`. Confidence.EXACT.
-- [x] `collectors/api_openai_compatible.py`: generic NDJSON tailer for **Groq, Together AI, DeepSeek, OpenRouter, Mistral, xAI Grok, Fireworks, Anyscale, Perplexity Sonar, Cerebras, Ollama, vLLM, LiteLLM** — one collector, ~13 providers covered. Confidence.EXACT.
-- [x] `collectors/manual.py`: CSV/YAML drop-file collector for untrackable web tools. Confidence.INFERRED.
-- [x] `collectors/manual_templates/`: starter CSV + README bundled in wheel covering Manus, WisperFlow, Gemini Advanced, Google AI Studio, v0, bolt.new, Lovable, Devin, Le Chat, DeepSeek web, Grok web, Perplexity Pro, ChatGPT web, Claude.ai web.
-- [x] `plans.yaml` expanded 10 → 24 entries. New `Trackability` enum (`local_exact` / `api_exact` / `web_only_manual`) tags every entry and powers the CLI's `plans --tier` filter.
-- [x] `cli.py`: Typer app with `version`, `paths`, `init`, `doctor`, `scan`, `status`, `plans` commands. All support `--json` for scripting. Verified end-to-end against real `~/.claude` data.
-- [x] 204 tests passing (up from 72), mypy --strict clean on 31 modules, ruff clean.
-
-### Day 4 — Dashboard ✅ delivered
-
-- [x] `dashboard/aggregator.py`: pure-function layer. Windows math + shared-bucket logic + weakest-confidence rollup + WEB_ONLY_MANUAL confidence downgrade + per-`account_id` isolation.
-- [x] `dashboard/server.py`: FastAPI, default bind `127.0.0.1:7878`. Endpoints `GET /api/{health,status,subscriptions,events,daily}` and `GET /`. `run()` refuses non-loopback without `allow_remote=True`.
-- [x] `dashboard/templates/index.html`: single-page HTMX + Alpine + Tailwind + Chart.js. Confidence tiers → solid / striped / dashed bars. pct_used → emerald → amber → red at 75/95/100%. Auto-refresh every 10 s.
-- [x] `tokie dashboard` CLI command with `--host` / `--port` / `--remote` / `--open/--no-open`. Opens browser on loopback; prints red `refusing to bind` on remote without `--remote`, amber `no auth yet` warning with `--remote`.
-- [x] Wheel hygiene: templates + static + manual_templates + `plans.yaml` verified to ship inside the wheel exactly once.
-- [x] 27 new tests (13 aggregator + 11 server + 3 CLI). Suite now at **231 passing, 3 skipped**, ruff clean, `mypy --strict` clean on 36 modules.
-
-### Day 5 (Fri, ~3 hrs) — Ship v0.1.0
-
-- [ ] README with honest scope paragraph (web chat = INFERRED) and dashboard screenshot.
-- [ ] `uv build` + `uv publish` to TestPyPI → verify install on a clean venv → promote to PyPI.
-- [ ] Build-in-public update: GIF of `tokie dashboard` showing real usage.
-
-**Exit gate:** a stranger can `uv tool install tokie-cli && tokie init && tokie dashboard` and see their own Claude Code usage within 2 minutes.
+> A working throwaway script reads real `~/.claude/projects/*.jsonl` data and the `UsageEvent` schema round-trips without loss. CI matrix is green.
 
 ---
 
-## 5. Week 2 — Expand coverage + live TUI (Phase 2 → v0.2.0)
+## 4. Phase 1 — Local core + minimal dashboard (v0.1)
 
-**Budget:** 25 hrs. **Tag:** `v0.2.0` Friday.
+**Calendar:** Week 1 Thu – Week 3 Fri | **Budget:** ~60 hrs | **Spec ref:** §10 Phase 1
 
-- [ ] **Cursor IDE collector** (~6 hrs): document session-token extraction for macOS/Windows/Linux; store in keyring; scope warning about unofficial endpoint; feature flag.
-- [ ] **Gemini CLI collector** (~3 hrs): local session files, mirror `claude_code` shape.
-- [ ] **GitHub Copilot CLI collector** (~3 hrs): same.
-- [ ] **Perplexity API collector** (~2 hrs): usage endpoint.
-- [ ] **`tokie watch` Textual TUI** (~6 hrs): per-tool progress bars, burn-rate sparkline, reset countdowns, keybinding to quit.
-- [ ] **Dashboard v2** (~4 hrs): historical timeline chart, burn-rate chart, light/dark mode toggle, `account_id` multi-account switcher.
-- [ ] **Build-in-public update** (~1 hr): side-by-side screenshot of TUI + dashboard.
+> **Decision (from spec §10 Phase 1):** Dashboard ships in v0.1 alongside the CLI, not v0.2. The FastAPI server is built anyway to feed `tokie status`; the HTMX templates are essentially free on top.
 
-**Exit gate:** `tokie doctor` shows 7 collectors green; TUI updates live within 2 seconds of a new Claude Code turn.
+### Sub-tracks and ordering
 
----
+```
+(a) repo + CI          ──► already done in Phase 0
+(b) schema + db + windows
+(c) collectors (Claude Code first, then Codex, then API collectors)
+(d) FastAPI + minimal HTMX
+(e) CLI commands: init / doctor / scan / status / dashboard
+(f) plans.yaml with known limits
+(g) PyPI release
+```
 
-## 6. Week 3 — Alerts (Phase 3 → v0.3.0)
+### Task breakdown
 
-**Budget:** 25 hrs. **Tag:** `v0.3.0` Friday.
+| # | Task | Hours | Notes |
+|---|---|---|---|
+| 1.1 | `schema.py` — `UsageEvent`, `Confidence`, `WindowType` (Pydantic → dataclass migration allowed later) | 3 | See spec §6 |
+| 1.2 | `db.py` — SQLite schema, hand-rolled migrations, `raw_hash` UNIQUE dedup | 4 | No ORM per spec §5 |
+| 1.3 | Window math (`windows.py`) — rolling-5h, daily, weekly, monthly, `shared_with` bucket logic | 5 | See spec §6 `LimitWindow` |
+| 1.4 | `config.py` — `tokie.toml` (TOML), `TokieConfig` dataclass, `platformdirs` paths | 3 | Keyring bridge stubs |
+| 1.5 | Collector base class (`collectors/base.py`) — `Collector` ABC, `CollectorHealth` | 2 | See spec §8 |
+| 1.6 | `claude_code.py` collector — parse `~/.claude/projects/*.jsonl`, two wire shapes | 5 | Shape A + B from spec §10 |
+| 1.7 | `codex.py` collector — `~/.codex/sessions/` rollouts | 3 | Shape A (responses-API) + B (chat) |
+| 1.8 | `api_anthropic.py` — usage endpoint, keyring for key | 3 | `exact` confidence |
+| 1.9 | `api_openai.py` — usage endpoint, keyring for key | 3 | |
+| 1.10 | `manual.py` — CSV/YAML drop ingest | 2 | |
+| 1.11 | `plans.yaml` — bundled limits for Claude Pro/Max 5x/20x, OpenAI tiers, Cursor Pro, Perplexity Pro, ChatGPT Plus/Pro | 4 | Schema version + `source_url` per entry |
+| 1.12 | `tokie init` — detect collectors, write `tokie.toml`, init DB | 3 | |
+| 1.13 | `tokie doctor` — health table, collector status, plans freshness | 3 | |
+| 1.14 | `tokie scan` — parallel async gather, per-collector error isolation | 3 | Idempotent by `raw_hash` |
+| 1.15 | `tokie status` — Rich table, confidence indicators, per-subscription rows | 2 | |
+| 1.16 | FastAPI server (`dashboard/server.py`) — aggregation, JSON API endpoints | 5 | `/api/status`, `/api/events`, etc. |
+| 1.17 | HTMX dashboard — subscription cards, recent sessions table, daily bar chart | 6 | No build step; Chart.js from CDN |
+| 1.18 | `tokie dashboard` command — start uvicorn, `--open` flag | 1 | |
+| 1.19 | PyPI Trusted Publishing setup + `release.yml` workflow | 2 | OIDC, no long-lived tokens |
+| 1.20 | README v0.1 — honest scope disclaimer for web-chat non-trackability | 2 | |
 
-- [ ] **Threshold engine** (~6 hrs): 75/95/100 default, 25/50 opt-in, de-dup keyed by `(subscription_id, window_id, threshold)` per window instance.
-- [ ] **Desktop notification channel** (~3 hrs): `desktop-notifier` on all three OSes.
-- [ ] **Webhook channel** (~3 hrs): Slack + Discord formats; secrets in keyring.
-- [ ] **Terminal banner** (~2 hrs): color-coded `tokie status` header when any threshold armed.
-- [ ] **Dashboard threshold UI** (~5 hrs): per-subscription threshold editor, POST back to `tokie.toml`.
-- [ ] **Alert integration tests** (~3 hrs): synthetic clock fixture, assert single-fire per threshold per window.
-- [ ] **Build-in-public update** (~1 hr): short video of a real 75% alert firing.
-- [ ] **Release hygiene** (~2 hrs): CHANGELOG, ship.
+**Total:** ~63 hrs
 
-**Exit gate:** an intentionally-primed fixture fires exactly one OS notification and one webhook per threshold crossing, never twice in the same window.
+### Exit gate
 
----
-
-## 7. Week 4 — Recommender + guided handoff (Phase 4 → v0.4.0)
-
-**Budget:** 25 hrs. **Tag:** `v0.4.0` Friday.
-
-- [ ] **`task_routing.yaml`** (~3 hrs): hand-tuned matrix (Perplexity → web research; Cursor → in-repo edits; Claude → long reasoning; Gemini → long context).
-- [ ] **Deterministic recommender** (~5 hrs): `score = capacity_remaining_pct × task_fit × (1 / relative_token_cost)`. `tokie suggest "<task>"` returns ranked list.
-- [ ] **Handoff extractor** (~5 hrs): read last N turns of the active session; produce a plain-text continuation transcript (LLM summarization is opt-in).
-- [ ] **`tokie handoff`** (~4 hrs): prints ranked subscriptions; user picks; Tokie copies prompt to clipboard and opens the target tool (`cursor://`, `code` CLI, or browser).
-- [ ] **Automatic trigger** (~3 hrs): when a collector sees `usage_limit_exceeded`, auto-offer handoff.
-- [ ] **Dashboard: recommender panel** (~3 hrs).
-- [ ] **Tests** (~1 hr), **build-in-public demo** (~1 hr).
-
-**Exit gate:** triggering handoff produces a clipboard-ready prompt and opens the recommended tool within 1 second.
-
----
-
-## 8. Week 5 — Plugin SDK + MCP server (Phase 5 → v1.0.0-rc)
-
-**Budget:** 25 hrs. **Tag:** `v1.0.0-rc1` Friday.
-
-- [ ] **Entry-point discovery** (~3 hrs): `tokie.collectors` group, auto-load `tokie-connector-*` on startup, surface in `tokie doctor`.
-- [ ] **`pytest-tokie-connector` contract plugin** (~4 hrs): fixtures + assertions any third party can run.
-- [ ] **Cookiecutter template** (~3 hrs): `tokie-connector-example` published to PyPI as a reference.
-- [ ] **Connector dev guide** (~3 hrs): `docs/CONNECTORS.md` with walkthrough.
-- [ ] **MCP server** (~7 hrs): `tokie mcp`, tools `get_usage` / `get_remaining` / `list_subscriptions` / `suggest_tool`. Stdio transport first, HTTP later.
-- [ ] **Claude Code + Cursor integration snippets** (~2 hrs): ready-to-paste JSON configs in README.
-- [ ] **SECURITY.md + disclosure policy** (~2 hrs).
-- [ ] **Build-in-public update** (~1 hr): video of Claude Code asking Tokie how much quota is left mid-session.
-
-**Exit gate:** `tokie-connector-example` installs from PyPI and shows up in `tokie doctor` green; Claude Code MCP config queries `get_remaining` live.
+> Install `uv tool install tokie-cli` on a clean machine. Run `tokie init`, `tokie scan`, `tokie status`. Dashboard at `http://127.0.0.1:7878` shows accurate Claude Code + Codex + one direct-API subscription with correct confidence tiers. PyPI tag `v0.1.0` is published.
 
 ---
 
-## 9. Week 6 — Polish + launch (v1.0.0)
+## 5. Phase 2 — More collectors + live TUI (v0.2)
 
-**Budget:** 25 hrs. **Tag:** `v1.0.0` Friday.
+**Calendar:** Weeks 4–5 | **Budget:** ~40 hrs | **Spec ref:** §10 Phase 2
 
-- [ ] **Docs pass** (~6 hrs): README rewrite, `docs/` with architecture diagram, screencasts, FAQ.
-- [ ] **Cross-platform smoke tests** (~4 hrs): full install on fresh macOS, Windows, Linux VMs.
-- [ ] **Performance pass** (~3 hrs): profile `tokie scan` on a year of Claude Code JSONL; fix any O(n²) surprises.
-- [ ] **Bug bash from dogfooding** (~5 hrs): work through the issues tagged during weeks 1–5.
-- [ ] **`plans.yaml` freshness check** (~2 hrs): confirm every entry has a `source_url` and is current.
-- [ ] **Launch assets** (~4 hrs): landing screenshot, demo video, HN/Reddit/X post drafts.
-- [ ] **Ship v1.0.0** + public launch.
-- [ ] **Buffer** (~1 hr).
+### Tasks
 
-**Exit gate:** v1.0.0 on PyPI, launch post live, at least one external user installs and reports results.
+| # | Task | Hours | Notes |
+|---|---|---|---|
+| 2.1 | `cursor_ide.py` collector — individual Pro via CSV export drop or NDJSON wrapper; `ESTIMATED` confidence for CSV, `EXACT` for NDJSON; document extraction procedure in README | 6 | Behind feature flag; unofficial endpoint disclaimer |
+| 2.2 | `gemini_api.py` collector — Gemini API usage endpoint or NDJSON log | 4 | |
+| 2.3 | `copilot_cli.py` collector — local session files | 4 | |
+| 2.4 | `perplexity_api.py` collector — NDJSON log drop (vendor gap: no historical endpoint) | 3 | Keyring slot reserved for future HTTP path |
+| 2.5 | `openai_compat.py` collector — log-proxy NDJSON for OpenAI-compatible endpoints | 3 | |
+| 2.6 | Multi-account support via `account_id` — differentiate personal vs. work subscriptions | 3 | |
+| 2.7 | Textual live TUI (`tui.py`) — `tokie watch` command, per-tool progress bars, burn rate | 7 | |
+| 2.8 | Dashboard v2 — historical timeline, burn-rate chart, reset countdown cards, light/dark mode | 7 | |
+| 2.9 | `tokie plans` command — list bundled plans, filter by trackability tier | 2 | |
+| 2.10 | `tokie paths` command — show config/data dirs | 1 | |
+| 2.11 | Tests: fixture-based tests for all new collectors, golden-file schema tests | 4 | |
+
+**Total:** ~44 hrs
+
+### Exit gate
+
+> `tokie doctor` shows ≥5 collectors green (or detected) on the dev machine. `tokie watch` opens a live Textual TUI that updates in real time as new session files appear. Multi-account Claude setup (personal + work) shows separate subscription rows. PyPI tag `v0.2.0`.
+
+---
+
+## 6. Phase 3 — Alerts (v0.3)
+
+**Calendar:** Week 6 | **Budget:** ~25 hrs | **Spec ref:** §10 Phase 3
+
+### Tasks
+
+| # | Task | Hours | Notes |
+|---|---|---|---|
+| 3.1 | `alerts/engine.py` — threshold evaluation: 75/95/100% default; 25/50% opt-in | 5 | Per spec §13: "25% is almost always noise" |
+| 3.2 | Alert de-duplication — don't fire the same threshold twice in the same window | 3 | Persisted in DB |
+| 3.3 | `desktop-notifier` channel | 3 | macOS / Windows / Linux |
+| 3.4 | Slack / Discord webhook channel (`tokie.toml` config) | 3 | HMAC secret in keyring |
+| 3.5 | Terminal bell + color-coded `tokie status` banner | 2 | `! thresholds armed` line |
+| 3.6 | `tokie alerts check` command — manual one-shot evaluation | 1 | |
+| 3.7 | `tokie alerts watch` command — background daemon loop | 2 | |
+| 3.8 | `tokie alerts reset` command — clear armed flags for a subscription | 1 | |
+| 3.9 | Dashboard threshold config UI — POST `/api/thresholds`, live reload | 3 | |
+| 3.10 | Tests: threshold engine, de-dup logic, channel dispatch mocks | 2 | |
+
+**Total:** ~25 hrs
+
+### Exit gate
+
+> Set a real 75% threshold on Claude Pro. Drive usage past 75% in a test run. The alert fires exactly once. Re-running `tokie alerts check` in the same window does not re-fire. Desktop notification appears. PyPI tag `v0.3.0`.
+
+---
+
+## 7. Phase 4 — Task recommender + guided handoff (v0.4)
+
+**Calendar:** Weeks 7–8 | **Budget:** ~50 hrs | **Spec ref:** §10 Phase 4
+
+### Recommender design
+
+**v1 (deterministic, shipped):**
+
+```
+score = capacity_remaining_pct × task_fit × (1 / relative_token_cost)
+```
+
+- `task_fit` from hand-tuned `task_routing.yaml` matrix (editable, PRs welcome)
+- Ranking is deterministic: same inputs always produce the same ordered list
+- No LLM call in the hot path
+
+**v2 (stretch, optional):**
+- Single structured LLM call to classify the task → feeds into the same scoring function
+- Gated behind `--llm-classify` flag; not shipped by default
+
+### Handoff flow
+
+```
+1. Collector sees usage_limit_exceeded error, OR user runs `tokie handoff`
+2. Extract last N turns from active session log
+3. Optional: one cheap LLM call → "continuation prompt" (skip with --no-llm)
+4. List subscriptions ranked by recommender score
+5. User selects → Tokie copies prompt to clipboard + opens target tool
+   (cursor:// URL | code CLI | browser)
+```
+
+### Tasks
+
+| # | Task | Hours | Notes |
+|---|---|---|---|
+| 4.1 | `task_routing.yaml` — hand-tuned tool × task matrix, 10 task types, tier 1/2/3 | 4 | Editable; community PRs |
+| 4.2 | `recommender/suggest.py` — scoring function, `task_fit` lookup, capacity weighting | 5 | No LLM in critical path |
+| 4.3 | `tokie suggest "task"` CLI command | 2 | |
+| 4.4 | `/api/recommend` + `/api/routing` dashboard endpoints | 3 | |
+| 4.5 | Dashboard routing panel — ranked tool list with saturation bars per task type | 5 | |
+| 4.6 | `/api/suggest-tool` MCP-friendly endpoint | 2 | Reused by Phase 5 |
+| 4.7 | `handoff/bridge.py` — session turn extraction from JSONL | 4 | Claude Code shape first |
+| 4.8 | Continuation prompt builder (literal transcript path, no LLM required) | 3 | |
+| 4.9 | Optional LLM summarization path (`--llm-classify`) | 4 | Gated; not default |
+| 4.10 | Clipboard copy + tool open (cursor URL / browser / code CLI) | 3 | Cross-platform |
+| 4.11 | `tokie handoff` CLI command | 2 | |
+| 4.12 | Alert-triggered handoff suggestions in `tokie status` banner | 2 | |
+| 4.13 | Tests: recommender scoring, handoff extraction, routing API | 5 | |
+| 4.14 | Dashboard routing UI polish — task selector, explanation tooltips | 3 | |
+| 4.15 | `tokie forecast` command — burn-rate projection to next reset | 3 | |
+
+**Total:** ~50 hrs
+
+### Exit gate
+
+> Claude Pro weekly cap is at ≥95%. Running `tokie suggest debugging` returns a ranked list with Cursor Pro (0% used) at tier 1 and Claude at tier 1 (saturated) in under 1 second. Running `tokie handoff` produces a clipboard-ready continuation prompt. PyPI tag `v0.4.0`.
+
+---
+
+## 8. Phase 5 — Plugin SDK + MCP server (v1.0-rc1)
+
+**Calendar:** Weeks 9–10 | **Budget:** ~50 hrs | **Spec ref:** §10 Phase 5
+
+### Tasks
+
+| # | Task | Hours | Notes |
+|---|---|---|---|
+| 5.1 | Entry-point discovery (`collectors/registry.py`) — `importlib.metadata` scan for `tokie.collectors` group | 3 | Built-ins take precedence on name collision |
+| 5.2 | `pytest-tokie-connector` plugin — `assert_collector_contract`, `assert_event_is_valid`, `assert_scan_yields_valid_events`, `assert_idempotent_rescan` | 6 | Ships as `pytest11` entry point |
+| 5.3 | `tokie-connector-example` template — copy-and-paste starter, `pyproject.toml` with entry-point config | 4 | In-repo under `connector-template/` |
+| 5.4 | `mcp_server/handlers.py` — pure transport-agnostic handlers: `list_subscriptions`, `get_usage`, `get_remaining`, `suggest_tool` | 5 | Decoupled for testability |
+| 5.5 | `mcp_server/server.py` — adapter for `mcp` Python SDK (lazy import, optional dep) | 4 | `tokie-cli[mcp]` extra |
+| 5.6 | `tokie mcp serve` + `tokie mcp tools` CLI commands | 2 | stdio transport |
+| 5.7 | `docs/CONNECTORS.md` — Collector contract, entry-point registration, contract testing guide | 4 | |
+| 5.8 | MCP integration snippets — Claude Code (`~/.claude.json`), Cursor (`~/.cursor/mcp.json`), Codex | 3 | |
+| 5.9 | `SECURITY.md` + responsible disclosure policy | 2 | |
+| 5.10 | Tests: MCP handler unit tests, MCP server adapter tests, connector contract tests | 6 | Decoupled from SDK |
+| 5.11 | CI: add `mcp` extra to test matrix | 1 | |
+| 5.12 | `pyproject.toml` bump to `1.0.0rc1`, CHANGELOG update | 1 | |
+| 5.13 | v1.0.0-rc1 PyPI release | 1 | |
+
+**Total:** ~42 hrs
+
+### Exit gate
+
+> `tokie mcp serve` responds to `initialize` with four tools listed. A Claude Code MCP config pointing at `tokie mcp serve` successfully calls `list_subscriptions` and returns live subscription data. `tokie-connector-example` installs from the template and appears in `tokie doctor`. PyPI tag `v1.0.0rc1`.
+
+---
+
+## 9. Week 11 — Release polish + dogfooding buffer
+
+**Calendar:** Week 11 | **Budget:** ~20 hrs
+
+### Tasks
+
+| # | Task | Hours |
+|---|---|---|
+| W11.1 | Full docs pass — README rewrite (honest scope, install, quick-start, screenshots) | 4 |
+| W11.2 | `docs/ARCHITECTURE.md` — ASCII diagram, event model, layered components, data flow | 3 |
+| W11.3 | `docs/FAQ.md` — 15+ Q&A covering install issues, tracking accuracy, Claude Pro window, MCP, privacy | 2 |
+| W11.4 | Performance pass on `tokie scan` — `asyncio.gather` parallel execution, wall-clock timing | 3 |
+| W11.5 | `plans.yaml` freshness check in `tokie doctor` — `PlansMetadata`, `load_plans_metadata`, staleness warning | 2 |
+| W11.6 | Bug bash: dogfood every command end-to-end on Windows (cp1252 encoding, test isolation, path separators) | 3 |
+| W11.7 | `LAUNCH.md` — one-line pitch, short/long launch posts, asset checklist | 1 |
+| W11.8 | `pyproject.toml` bump to `1.0.0`, final CHANGELOG, git tag, push | 1 |
+| W11.9 | `tests/conftest.py` — autouse fixture isolating `TOKIE_CONFIG_HOME` / `TOKIE_DATA_HOME` to per-test sandbox | 1 |
+
+**Total:** ~20 hrs
+
+### Bugs caught during dogfooding (recorded here as institutional memory)
+
+| Bug | Root cause | Fix |
+|---|---|---|
+| `UnicodeEncodeError` on `tokie status` with armed thresholds (Windows cp1252) | `⚠` character + Rich legacy renderer can't encode it on cp1252 terminals | `_force_utf8_stdio()` reconfigures stdout/stderr to UTF-8 at CLI entry; `⚠` replaced with ASCII `!` |
+| Test suite overwrites user's real `tokie.toml` on every `pytest` run | `POST /api/thresholds` calls `save_config(new_config, default_config_path())` with no path override; tests lacked isolation | `tests/conftest.py` autouse fixture redirects `TOKIE_CONFIG_HOME` / `TOKIE_DATA_HOME` to `tmp_path_factory` sandbox |
+| `v1.0.0` GitHub Release never created | Release workflow fails at *Publish to TestPyPI* (OIDC Trusted Publisher misconfigured on PyPI side); gates the `github-release` job | Code is correct; fix requires PyPI admin UI change on the account; documented in release notes |
 
 ---
 
 ## 10. Cross-phase workstreams
 
-### Testing
+### Testing strategy
 
-- **Fixtures:** every collector ships 3–5 sanitized real records under `tests/fixtures/<collector>/`.
-- **Golden files:** Pydantic schema changes regenerate golden JSON; CI fails on unreviewed diffs.
-- **Contract tests:** `pytest-tokie-connector` (delivered W5) backfilled against built-in collectors.
-- **Network tests:** `@pytest.mark.network`, skipped in default CI, run nightly.
+Four test categories run throughout all phases (spec §11.3):
 
-### CI
+| Category | Scope | Tool | CI behavior |
+|---|---|---|---|
+| **Fixture-based unit** | Every collector: given sanitized fixture → expect `list[UsageEvent]`. No I/O, no network. | `pytest` | Always runs |
+| **Golden-file schema** | `UsageEvent` Pydantic shape changes regenerate golden JSONs; CI fails on unreviewed diff | `pytest` + snapshot | Always runs; fail on diff |
+| **Contract tests** | Third-party connectors run `pytest-tokie-connector` against their own collector | `pytest11` plugin | Third-party CI; also run for built-ins |
+| **Network tests** | Any test requiring real API calls | `pytest.mark.network` | Skipped in default CI; opt-in |
 
-- Matrix 3.11/3.12/3.13 × macOS/Linux/Windows from Day 2.
-- `ruff check` + `ruff format --check` + `mypy --strict` + `pytest` all must pass.
-- Trusted Publishing to PyPI from tagged releases only.
+**Per-collector fixture minimum:** 3 files covering (a) minimal valid record, (b) record with all optional fields, (c) malformed / truncated record (must not crash, must skip gracefully).
 
-### Security checklist (verified each release)
+### CI matrix
 
-- [ ] Credentials only in OS keyring (grep `tokie.toml` for api_key-like patterns in CI).
-- [ ] `tokie.db`, audit log, config at mode `0600` on POSIX.
-- [ ] Dashboard binds loopback by default; `--remote` prints warning.
-- [ ] No prompt content stored unless `--index-content`.
-- [ ] No auto-update; no default telemetry.
+```yaml
+strategy:
+  matrix:
+    python-version: ["3.11", "3.12", "3.13"]
+    os: [ubuntu-latest, macos-latest, windows-latest]
+```
+
+All 9 combinations run on every PR. Windows failures are treated as blocking (equal to Linux/macOS) from Phase 1 onward.
+
+**Additional CI jobs:**
+
+| Job | Trigger | Purpose |
+|---|---|---|
+| `lint` | Every push | `ruff check .` + `ruff format --check` |
+| `typecheck` | Every push | `mypy --strict src tests` |
+| `build` | Release tag | `uv build` + smoke-test wheel in clean venv |
+| `publish-testpypi` | Release tag | OIDC Trusted Publishing to TestPyPI |
+| `publish-pypi` | After testpypi passes | OIDC Trusted Publishing to PyPI |
+| `github-release` | After pypi passes | `softprops/action-gh-release` with dist artifacts |
+
+### Security checklist (per-phase)
+
+Run at every phase boundary before tagging:
+
+- [ ] No API keys, secrets, or prompt content in any committed file
+- [ ] All new credentials use `keyring`, never `tokie.toml`
+- [ ] Dashboard still binds `127.0.0.1` by default; `--remote` prints warning
+- [ ] New files in `~/.tokie/` created at mode `0600` (POSIX) or ACL-restricted (Windows)
+- [ ] Audit log entries added for any new collection run type
+- [ ] `SECURITY.md` updated if attack surface changes
+- [ ] Outbound network calls are either gated by user consent or explicitly documented
 
 ---
 
 ## 11. Risk register
 
 | Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Cursor unofficial endpoint breaks mid-sprint | Medium | Medium | Feature-flag the collector; `tokie doctor` surfaces the status; fall back gracefully. |
-| Claude Code JSONL format changes | Low-Med | High | Fixture-based tests catch immediately on CI; hotfix release path documented. |
-| Claude Pro web underreporting confuses users | High | Medium | Always render web portion as `INFERRED` with a tooltip; README section explicitly calling it out. |
-| Solo burnout at 25 hrs × 6 weeks | Medium | High | Exit-gate commits each Friday; Week 6 is partly buffer; never pull forward scope. |
-| MCP spec drift | Low | Medium | Pin `mcp` SDK version; integration tests against Claude Code current release. |
-| Scope creep (web chat / menu bar / teams) | High | High | Pinned to post-v1.0 in README roadmap; PRs that add these land on a branch, not main. |
-| Name collision on PyPI | Low | Medium | Day 1 check; fallbacks `tokie-cli`, `tokied`, `tokey` pre-cleared. |
+|---|---|---|---|
+| **Cursor unofficial endpoint breaks** | Medium (breaks once a year historically) | High — collector goes dark | Collector ships behind an explicit feature flag (`enabled = false` default); `tokie doctor` surfaces a clear warning with next steps; CSV drop-ingest path is always available as fallback |
+| **Vendor JSONL format drifts** | Medium | Medium — silent incorrect data | Fixture-based tests catch format changes on CI; `raw_hash` dedup means old data is never re-emitted even if format changes; staleness is surfaced via confidence degradation |
+| **Claude Pro web underreporting** | Certain (by design) | Medium — user confusion | Always render Claude Pro progress as `INFERRED` for the web portion; README §3 explains the shared-bucket model upfront; confidence tier shown in every UI surface |
+| **plans.yaml goes stale** | Medium (vendor changes limits every 6–12 months) | Medium — wrong quota calculations | `tokie doctor` shows plan freshness (age + staleness warning); `plans.yaml` has `updated` date header; community PR workflow for limit changes; user can override with `plans.override.yaml` |
+| **PyPI OIDC Trusted Publisher misconfigured** | Low (happened on v1.0) | Low — release blocked, code fine | Build job still runs and uploads artifacts; manual publish via `uv publish` always available as fallback; fix requires PyPI admin UI (5-minute fix when caught) |
+| **Windows encoding (cp1252)** | High on Windows | Medium — crash on armed thresholds | `_force_utf8_stdio()` at CLI entry; avoid non-ASCII in Rich markup strings; test matrix includes Windows from Phase 1 |
+| **Test pollution of user config** | High without isolation | High — overwrites real tokie.toml | `tests/conftest.py` autouse fixture redirects `TOKIE_CONFIG_HOME` / `TOKIE_DATA_HOME`; verified by timestamp check in CI smoke test |
+| **Scope creep: web chat, menu-bar, team edition** | Medium | High — dilutes focus | Explicitly pinned to post-v1.0 stretch in spec §10; backlog items require explicit milestone promotion; no one-off features without an exit gate |
+| **Solo burnout at 25+ hrs/week × 11 weeks** | Medium | High — half-done states | Week 11 buffer; every session ends with either a passing commit or an explicit stash note; exit gates prevent cosmetic "done" claims |
+| **MCP SDK API breaks between mcp versions** | Low | Medium — MCP server fails to start | `mcp>=1.0` pinned; lazy import with graceful `MCPNotInstalledError`; handlers decoupled from SDK for unit testability |
+| **Third-party connector runs malicious code** | Low | High — in-process Python limitation | Docs warn: "Only install `tokie-connector-*` packages you trust"; curated "blessed connectors" list maintained in README; no auto-discovery of unpinned packages |
 
 ---
 
-## 12. Build-in-public rhythm
+## 12. Definition of done per release
 
-- **Monday:** short "this week I'm shipping X" post (X/BlueSky/blog).
-- **Wed/Thu:** mid-week progress screenshot if something visual ships.
-- **Friday:** tag release, post changelog + demo GIF, link to GitHub.
-- **Sunday:** 30-minute retro — what slipped, what's cut for next week.
+A release is complete when **all** of the following are true:
+
+### Code
+- [ ] All tests pass: `pytest` (403+ tests, no unexpected failures)
+- [ ] No lint errors: `ruff check .` exits 0
+- [ ] No type errors: `mypy --strict src tests` exits 0
+- [ ] No regressions in CI matrix (9 Python × OS combinations)
+
+### Functionality
+- [ ] Exit gate for the phase is met (see §3–§9 above)
+- [ ] `tokie doctor` exits 0 on a fresh `tokie init` machine
+- [ ] `tokie scan` is idempotent: running twice produces 0 new events on second run
+- [ ] Dashboard loads at `http://127.0.0.1:7878` with real data
+
+### Documentation
+- [ ] `CHANGELOG.md` entry written with accurate summary of changes
+- [ ] `README.md` reflects the new feature set (no stale screenshots, no missing commands)
+- [ ] Any new collector has a `health()` message that guides the user to fix it
+
+### Release mechanics
+- [ ] `pyproject.toml` version bumped
+- [ ] Git tag pushed: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+- [ ] CI Release workflow triggered (build job must pass even if publish fails)
+- [ ] One real-user install smoke test: `uv tool install tokie-cli && tokie version`
+
+### Security
+- [ ] Security checklist (§10) passed
+- [ ] No secrets in committed files (`git log --all` check)
 
 ---
 
-## 13. Definition of done (applied each Friday)
+## 13. Immediate next actions (historical record)
 
-1. All phase exit-gate items checked.
-2. CI green on the tagged commit across the full matrix.
-3. `uv tool install tokie-cli==<new version>` works on a clean machine.
-4. CHANGELOG entry written.
-5. Build-in-public post drafted and scheduled.
-6. At least one issue opened for next week's top concern.
+These were the §15 steps from the source spec, with actual execution dates:
 
----
-
-## 14. Immediate next actions (Week 1, in order)
-
-1. **Mon AM:** run `scripts/v00_discover.py` against your local Claude JSONL. Paste the first few rows of real data into a commit to lock the schema against reality.
-2. **Mon PM:** name check + `git init` + push initial commit with `TOKIE_DEVELOPMENT_PLAN_FINAL.md` and this file.
-3. **Tue:** wire CI. Green badge before any logic ships.
-4. **Wed–Thu:** `schema.py`, `db.py`, `windows.py`, Claude Code + Codex + API collectors, `tokie init/doctor/scan/status`.
-5. **Fri:** minimal dashboard, publish `v0.1.0` to PyPI, share the demo.
-
-Everything after Week 1 falls out of §4–§9 of this plan.
+| Step | Spec action | Actual date | Outcome |
+|---|---|---|---|
+| 1 | Run the v0.0 script (50 lines, `~/.claude/projects/*.jsonl`) | Week 1 Mon | ✅ Confirmed wire shapes A and B; schema finalized |
+| 2 | Clear the name (`tokie` on PyPI) | Week 1 Tue | ✅ `tokie` was available; `tokie-cli` used as PyPI package name, `tokie` as the command |
+| 3 | Create repo + wire CI | Week 1 Wed | ✅ GitHub repo created; CI matrix green on day 1 |
+| 4 | Ship `tokie doctor` + Claude Code collector | Week 1 Fri | ✅ Pushed to TestPyPI; installed on dev machine; saw real data |
+| 5 | Every subsequent milestone | Weeks 2–11 | ✅ v0.1.0 → v0.2.0 → v0.3.0 → v0.4.0 → v1.0.0-rc1 → v1.0.0 all shipped |
 
 ---
 
-*Implementation plan derived from [TOKIE_DEVELOPMENT_PLAN_FINAL.md](TOKIE_DEVELOPMENT_PLAN_FINAL.md). 2026-04-20.*
+## 14. Appendix: collector quick-reference
+
+| Collector name | Source | Detection | Confidence | Notes |
+|---|---|---|---|---|
+| `claude-code` | `~/.claude/projects/*.jsonl` | Auto (directory exists) | `exact` | Two wire shapes (responses-API + chat-completions) |
+| `codex` | `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl` | Auto (directory exists) | `exact` | Same two shapes; also honors `TOKIE_CODEX_SESSION_ROOT` |
+| `anthropic-api` | Anthropic Admin API | Key in keyring | `exact` | `TOKIE_ANTHROPIC_ADMIN_KEY` or keyring slot |
+| `openai-api` | OpenAI Admin API | Key in keyring | `exact` | |
+| `gemini-api` | Gemini API usage endpoint | Key configured | `exact` | |
+| `cursor-ide` | CSV export drop (`~/.cursor/history/`) or NDJSON | Drop file detected | `estimated` (CSV) / `exact` (NDJSON) | Opt-in; `cursor.com/dashboard` → Request history → Download CSV |
+| `perplexity-api` | NDJSON drop (`~/.perplexity/history/`) | Drop file detected | `exact` | Vendor gap: no historical API endpoint; drop your own response logs |
+| `copilot-cli` | Local session JSONL | Drop file detected | `exact` | `TOKIE_COPILOT_LOG` or `~/.config/github-copilot/history/` |
+| `openai-compat` | HTTP proxy NDJSON | `TOKIE_OPENAI_COMPAT_LOG` set | `exact` | Intercept OpenAI-compatible endpoints |
+| `manual` | CSV/YAML drop (`~/.local/share/tokie/manual/`) | Drop file detected | `inferred` | Fallback for any tool with no local signal |
+| Third-party | `tokie.collectors` entry point | `importlib.metadata` | Varies | `tokie-connector-*` on PyPI |
+
+---
+
+## 15. Appendix: subscription plan IDs
+
+These are the bundled plan IDs in `plans.yaml` as of v1.0.0. Use these in `tokie.toml` `subscriptions` blocks.
+
+| Plan ID | Display name | Trackability | Window |
+|---|---|---|---|
+| `claude_pro_personal` | Claude Pro | `local_exact` | rolling_5h (45 msg) + weekly (900 msg) |
+| `claude_max5_personal` | Claude Max 5x | `local_exact` | rolling_5h (225 msg) + weekly (4500 msg) |
+| `claude_max20_personal` | Claude Max 20x | `local_exact` | rolling_5h (900 msg) + weekly (18000 msg) |
+| `anthropic_api_direct` | Anthropic API | `api_exact` | none (pay-as-you-go) |
+| `openai_tier1` | OpenAI API Tier 1 | `api_exact` | none |
+| `openai_tier2` | OpenAI API Tier 2 | `api_exact` | none |
+| `openai_tier3` | OpenAI API Tier 3 | `api_exact` | none |
+| `chatgpt_plus_personal` | ChatGPT Plus | `web_only_manual` | rolling_5h (80 msg) |
+| `cursor_pro_personal` | Cursor Pro | `local_exact` | monthly (500 requests) |
+| `perplexity_pro_personal` | Perplexity Pro | `web_only_manual` | daily (300 searches) |
+| `chatgpt_pro_personal` | ChatGPT Pro | `web_only_manual` | none |
+| `gemini_advanced_personal` | Gemini Advanced | `web_only_manual` | none |
+| `google_ai_studio_free` | Google AI Studio (free) | `web_only_manual` | none |
+| `mistral_le_chat_pro` | Mistral Le Chat Pro | `web_only_manual` | none |
+| `deepseek_web` | DeepSeek Chat | `web_only_manual` | none |
+| `grok_premium_plus` | Grok Premium+ | `web_only_manual` | none |
+| `manus_personal` | Manus | `web_only_manual` | none |
+| `devin_team` | Devin Team | `api_exact` | monthly |
+
+> For `web_only_manual` plans, bind the plan to get routing recommendations even though no usage data is collected. Usage appears as 0% used (never saturates automatically).
+
+---
+
+*This implementation plan was drafted from [TOKIE_DEVELOPMENT_PLAN_FINAL.md](TOKIE_DEVELOPMENT_PLAN_FINAL.md) and reflects the actual compressed 6-week sprint that shipped v1.0.0 on 2026-04-21.*
