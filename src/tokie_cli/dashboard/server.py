@@ -187,6 +187,153 @@ def create_app(
         payload = _build(state)
         return {"accounts": list(payload.accounts)}
 
+    @app.get("/api/routing", response_class=JSONResponse)
+    def routing_catalog(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        """Return the full task catalog from ``task_routing.yaml``.
+
+        Imported lazily so any YAML error surfaces as a 500 with a
+        readable message instead of blocking dashboard startup.
+        """
+
+        from tokie_cli.routing import (
+            load_routing_table,
+        )
+
+        try:
+            table = load_routing_table()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"failed to load routing table: {exc}"
+            ) from exc
+        _ = state  # state is unused today but keeps the dependency hook warm
+        return {
+            "version": table.version,
+            "updated": table.updated,
+            "tools": [
+                {
+                    "id": t.id,
+                    "display_name": t.display_name,
+                    "products": list(t.products),
+                    "notes": t.notes,
+                }
+                for t in table.tools
+            ],
+            "tasks": [
+                {
+                    "id": t.id,
+                    "description": t.description,
+                    "preferred": [
+                        {
+                            "tool": p.tool_id,
+                            "tier": p.tier,
+                            "rationale": p.rationale,
+                        }
+                        for p in t.preferred
+                    ],
+                }
+                for t in table.tasks
+            ],
+        }
+
+    @app.get("/api/recommend", response_class=JSONResponse)
+    def recommend_endpoint(
+        task: str, state: AppState = Depends(get_state)
+    ) -> dict[str, Any]:
+        """Return a ranked :func:`recommend` result for ``task``.
+
+        Example: ``GET /api/recommend?task=code_generation``.
+        """
+
+        from tokie_cli.routing import (
+            load_routing_table,
+            recommend,
+            suggest_alternatives,
+        )
+
+        try:
+            table = load_routing_table()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"failed to load routing table: {exc}"
+            ) from exc
+        try:
+            table.task(task)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        payload = _build(state)
+        result = recommend(
+            task_id=task, table=table, subscriptions=payload.subscriptions
+        )
+
+        # Also surface auto-handoff style suggestions when any subscription
+        # is currently over its limit — useful in the UI to show "try X".
+        from tokie_cli.alerts.thresholds import (
+            ThresholdRule,
+            evaluate_thresholds,
+        )
+
+        rules = [
+            ThresholdRule(
+                plan_id=r.plan_id,
+                account_id=r.account_id,
+                levels=tuple(r.levels),
+                channels=tuple(r.channels),
+            )
+            for r in state.config.thresholds
+        ]
+        armed = evaluate_thresholds(payload.subscriptions, rules)
+        suggestions = suggest_alternatives(
+            crossings=armed,
+            subscriptions=payload.subscriptions,
+            table=table,
+            fallback_task=task,
+        )
+
+        return {
+            "task_id": result.task_id,
+            "description": result.task_description,
+            "recommendations": [
+                {
+                    "tool_id": r.tool_id,
+                    "tool_display_name": r.tool_display_name,
+                    "plan_id": r.plan_id,
+                    "plan_display_name": r.plan_display_name,
+                    "account_id": r.account_id,
+                    "product": r.product,
+                    "tier": r.tier,
+                    "rationale": r.rationale,
+                    "saturation": r.saturation,
+                    "remaining_fraction": r.remaining_fraction,
+                    "worst_window_type": r.worst_window_type,
+                    "is_over": r.is_over,
+                }
+                for r in result.recommendations
+            ],
+            "missing_tools": list(result.missing_tools),
+            "handoff_suggestions": [
+                {
+                    "saturated_plan_id": s.saturated_plan_id,
+                    "saturated_display_name": s.saturated_display_name,
+                    "threshold_pct": s.threshold_pct,
+                    "alternative": (
+                        None
+                        if s.alternative is None
+                        else {
+                            "tool_id": s.alternative.tool_id,
+                            "tool_display_name": s.alternative.tool_display_name,
+                            "plan_id": s.alternative.plan_id,
+                            "account_id": s.alternative.account_id,
+                            "tier": s.alternative.tier,
+                            "rationale": s.alternative.rationale,
+                        }
+                    ),
+                    "reason": s.reason,
+                }
+                for s in suggestions
+            ],
+        }
+
     @app.get("/api/alerts", response_class=JSONResponse)
     def alerts_status(state: AppState = Depends(get_state)) -> dict[str, Any]:
         """Live evaluation of threshold rules (no dispatch, no DB write).

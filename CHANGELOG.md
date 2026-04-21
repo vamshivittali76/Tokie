@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-20
+
+Week 4 of the build-in-public run: turn Tokie from a passive tracker into
+an active advisor. When you hit a limit, Tokie now tells you *which tool
+to reach for next* — deterministically, from a hand-tuned routing table,
+ranked by your own remaining capacity. No LLM call, no randomness, no
+network traffic.
+
+### Added
+- **`task_routing.yaml`** (`src/tokie_cli/task_routing.yaml`): hand-tuned
+  task → tool preference matrix, versioned and bundled with the wheel.
+  Covers 11 task types (code_generation, code_review, debugging,
+  refactoring, documentation, research, long_context, quick_question,
+  data_analysis, brainstorming) across 13 tools. Tiers 1/2/3 are human
+  judgements; community PRs keep it fresh.
+- **Routing table loader** (`src/tokie_cli/routing/table.py`): parses and
+  validates the YAML into a frozen `RoutingTable` of `ToolEntry` and
+  `TaskEntry` dataclasses. Schema errors surface as loud `ValueError`s at
+  load time, not silent misrecommendations.
+- **Deterministic recommender** (`src/tokie_cli/routing/recommender.py`):
+  `recommend(task_id, table, subscriptions)` ranks your active
+  subscriptions against the task's preferred tools by tier, then by
+  remaining capacity. Pure function, fully reproducible — same inputs,
+  same output, every time.
+- **Handoff extractor** (`src/tokie_cli/routing/handoff.py`):
+  `build_handoff(events, subscription=..., recommendation=...)` builds a
+  `HandoffBrief` (goal, source, target, last-N events) from recent usage;
+  `render_handoff(brief, fmt="markdown"|"plain")` produces a paste-ready
+  summary for the next tool.
+- **Auto-handoff bridge** (`src/tokie_cli/routing/auto_handoff.py`):
+  `suggest_alternatives(crossings, subscriptions, table)` turns a live
+  set of `ThresholdCrossing`s into `HandoffSuggestion`s — "Claude Pro is
+  at 100%, try Cursor Pro (tier 1, 40% free)". Used by both the CLI and
+  the dashboard so the guidance is consistent.
+- **`tokie suggest [task_type]`**: ranked CLI output with tier badges,
+  rationale from the routing table, saturation %, and a contextual
+  handoff hint block when any subscription is over its limit.
+- **`tokie handoff`**: prints a paste-ready brief (markdown by default,
+  `--format plain` for copy-to-chat) summarising recent activity and the
+  suggested target tool.
+- **Dashboard recommender panel** (`src/tokie_cli/dashboard/templates/index.html`):
+  new "Recommend a tool" section with a task-type selector. Shows ranked
+  subscriptions with tier/saturation chips, rationale, and a cyan
+  "suggested handoffs" block when thresholds are armed.
+- **Dashboard APIs**:
+  - `GET /api/routing` — full routing catalog (tools + tasks + tiers).
+  - `GET /api/recommend?task=<id>` — ranked recommendations for a task
+    plus auto-handoff suggestions derived from current armed thresholds.
+    Returns 404 for unknown task ids so the UI can surface typos.
+
+### Changed
+- `tokie status` and `tokie alerts check` now render handoff hints under
+  any armed threshold, so "you're at 95%" immediately tells you *where
+  to go next*.
+- `src/tokie_cli/cli.py` grew a `_load_subscription_views` helper so the
+  new `suggest` / `handoff` commands share the exact event + plan load
+  path used by `status` and `alerts check`.
+
+### Internal
+- New `src/tokie_cli/routing/` package with `table`, `recommender`,
+  `handoff`, and `auto_handoff` submodules, plus a thin `__init__.py`
+  that re-exports the public surface.
+- Full unit coverage: `tests/test_routing_table.py`,
+  `tests/test_routing_recommender.py`, `tests/test_routing_handoff.py`,
+  `tests/test_routing_auto_handoff.py`, and
+  `tests/test_dashboard_recommender.py` pin both pure-function and
+  HTTP-endpoint behaviour.
+
 ## [0.3.0] — 2026-04-20
 
 Week 3 of the build-in-public run: close the feedback loop with a real

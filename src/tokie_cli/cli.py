@@ -403,6 +403,7 @@ def status(
         console.print("[bold yellow]⚠ thresholds armed[/bold yellow]")
         for line in alert_result.banner_lines:
             console.print(f"  [{_severity_style(line.severity)}]{line.text}[/]")
+        _render_handoff_hints(cfg, alert_result.armed)
         console.print()
 
     table = Table(title="Tokie status", show_header=True, header_style="bold")
@@ -600,6 +601,39 @@ def _severity_style(severity: str) -> str:
     }.get(severity, "white")
 
 
+def _render_handoff_hints(cfg: Any, crossings: Any) -> None:
+    """Best-effort banner addition: "your X is at 100% — try Y".
+
+    Silently no-ops if the routing table or aggregator fails, because
+    the banner must never block on optional UX.
+    """
+
+    try:
+        from tokie_cli.routing import load_routing_table, suggest_alternatives
+
+        table = load_routing_table()
+        _events, views = _load_subscription_views(cfg)
+        if not views:
+            return
+        hints = suggest_alternatives(
+            crossings=crossings, subscriptions=views, table=table
+        )
+    except Exception:
+        return
+    for hint in hints:
+        if hint.alternative is not None:
+            console.print(
+                f"  [bold cyan]↪ handoff:[/] {hint.saturated_display_name} -> "
+                f"[bold]{hint.alternative.tool_display_name}[/] "
+                f"([dim]{hint.alternative.plan_id}[/])"
+            )
+        else:
+            console.print(
+                f"  [dim]↪ no alternative configured for "
+                f"{hint.saturated_display_name}[/dim]"
+            )
+
+
 def _render_alert_result(result: AlertRunResult) -> None:
     """Print banner + fired-summary for a run of ``tokie alerts check``."""
 
@@ -609,6 +643,7 @@ def _render_alert_result(result: AlertRunResult) -> None:
     console.print("[bold]armed thresholds[/bold]")
     for line in result.banner_lines:
         console.print(f"  [{_severity_style(line.severity)}]{line.text}[/]")
+    _render_handoff_hints(load_config(), result.armed)
     if result.fired:
         console.print(f"[bold green]dispatched {len(result.fired)} new fire(s):[/]")
         for crossing in result.fired:
@@ -827,6 +862,327 @@ def alerts_banner(
         return
     for line in result.banner_lines:
         console.print(f"[{_severity_style(line.severity)}]{line.text}[/]")
+
+
+def _load_subscription_views(cfg: Any) -> Any:
+    """Shared helper for ``suggest`` / ``handoff`` to avoid repeating boilerplate.
+
+    Returns ``(events, subscription_views)`` using the same aggregator the
+    dashboard relies on so the recommender and the UI can never drift.
+    """
+
+    from tokie_cli.dashboard.aggregator import build_subscription_views
+
+    if not cfg.db_path.exists():
+        return [], ()
+    conn = connect(cfg.db_path)
+    try:
+        migrate(conn)
+        events = list(query_events(conn))
+    finally:
+        conn.close()
+    try:
+        plans_list = load_plans()
+    except Exception:  # pragma: no cover - misbundled plans.yaml
+        plans_list = []
+    views = build_subscription_views(
+        cfg.subscriptions,
+        plans_list,
+        events,
+        now=datetime.now(UTC),
+    )
+    return events, views
+
+
+@app.command()
+def suggest(
+    task: str | None = typer.Argument(
+        None,
+        help="Task type to recommend for (e.g. code_generation, debugging, research).",
+    ),
+    list_tasks: bool = typer.Option(
+        False, "--list", help="List every task type the routing table supports."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+    top: int = typer.Option(
+        5, "--top", "-n", min=1, help="Limit the number of recommendations shown."
+    ),
+) -> None:
+    """Recommend the best subscription for a task, ranked by tier + slack.
+
+    The recommender is fully deterministic: same config + same usage data
+    always produces the same ordering. Pass ``--list`` to see the task
+    catalog, or pass a task id (e.g. ``tokie suggest debugging``) to get
+    a ranked list of your own subscriptions that can handle it.
+    """
+
+    from tokie_cli.routing import (
+        available_task_types,
+        load_routing_table,
+        recommend,
+    )
+
+    try:
+        table = load_routing_table()
+    except Exception as exc:
+        err_console.print(f"[red]failed to load routing table: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    if list_tasks or task is None:
+        task_ids = available_task_types(table)
+        if as_json:
+            console.print_json(
+                data={
+                    "tasks": [
+                        {"id": t.id, "description": t.description} for t in table.tasks
+                    ]
+                }
+            )
+            return
+        tbl = Table(title="Task types", show_header=True, header_style="bold")
+        tbl.add_column("id")
+        tbl.add_column("description")
+        for t in table.tasks:
+            tbl.add_row(t.id, t.description)
+        console.print(tbl)
+        if task is None:
+            console.print(
+                f"\n[dim]{len(task_ids)} task types. "
+                f"Run `tokie suggest <id>` to get a ranked recommendation.[/dim]"
+            )
+        return
+
+    try:
+        table.task(task)
+    except KeyError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+    cfg = load_config()
+    _events, views = _load_subscription_views(cfg)
+    if not views:
+        err_console.print(
+            "[yellow]no subscriptions configured; run 'tokie init' "
+            "and add some in tokie.toml first.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    result = recommend(task_id=task, table=table, subscriptions=views)
+    top_recs = result.recommendations[:top]
+
+    if as_json:
+        console.print_json(
+            data={
+                "task_id": result.task_id,
+                "description": result.task_description,
+                "recommendations": [
+                    {
+                        "tool": r.tool_id,
+                        "tool_display_name": r.tool_display_name,
+                        "plan_id": r.plan_id,
+                        "plan_display_name": r.plan_display_name,
+                        "account_id": r.account_id,
+                        "product": r.product,
+                        "tier": r.tier,
+                        "rationale": r.rationale,
+                        "saturation": r.saturation,
+                        "remaining_fraction": r.remaining_fraction,
+                        "worst_window_type": r.worst_window_type,
+                        "is_over": r.is_over,
+                    }
+                    for r in top_recs
+                ],
+                "missing_tools": list(result.missing_tools),
+            }
+        )
+        return
+
+    if not top_recs:
+        console.print(
+            f"[yellow]No subscription covers '{task}'.[/yellow] "
+            f"Missing tools: {', '.join(result.missing_tools) or '(none)'}"
+        )
+        return
+
+    tbl = Table(
+        title=f"Recommendations for {task}", show_header=True, header_style="bold"
+    )
+    tbl.add_column("#", justify="right")
+    tbl.add_column("tool")
+    tbl.add_column("plan / account")
+    tbl.add_column("tier", justify="right")
+    tbl.add_column("use", justify="right")
+    tbl.add_column("why")
+    for i, rec in enumerate(top_recs, start=1):
+        usage = (
+            "[bold red]OVER[/]"
+            if rec.is_over
+            else f"{rec.saturation * 100:.0f}%"
+        )
+        tbl.add_row(
+            str(i),
+            rec.tool_display_name,
+            f"{rec.plan_id}\n[dim]{rec.account_id}[/dim]",
+            str(rec.tier),
+            usage,
+            rec.rationale,
+        )
+    console.print(tbl)
+    if result.missing_tools:
+        console.print(
+            f"\n[dim]Not covered by any of your subscriptions: "
+            f"{', '.join(result.missing_tools)}[/dim]"
+        )
+
+
+@app.command()
+def handoff(
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        "-t",
+        help="Task type the work belongs to (used to pick a target tool).",
+    ),
+    goal: str | None = typer.Option(
+        None, "--goal", "-g", help="One-line summary of what you're trying to do."
+    ),
+    session: str | None = typer.Option(
+        None, "--session", "-s", help="Limit context to events with this session_id."
+    ),
+    from_plan: str | None = typer.Option(
+        None,
+        "--from",
+        help="plan_id you're leaving (defaults to your most-recently-used plan).",
+    ),
+    max_events: int = typer.Option(
+        8, "--events", "-n", min=1, help="How many recent events to include."
+    ),
+    fmt: str = typer.Option(
+        "markdown", "--format", "-f", help="Output format: markdown or plain."
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Extract a paste-ready handoff brief for switching tools.
+
+    The brief captures (a) your stated goal, (b) where you were working,
+    (c) the recommended next tool (when ``--task`` is set), and (d) the
+    last N usage events as lightweight context. The output goes to
+    stdout so you can pipe it to the clipboard (`tokie handoff | pbcopy`)
+    or redirect it to a file.
+    """
+
+    if fmt not in {"markdown", "plain"}:
+        err_console.print(
+            f"[red]unknown format {fmt!r}; expected 'markdown' or 'plain'.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    from tokie_cli.routing import (
+        build_handoff,
+        load_routing_table,
+        recommend,
+        render_handoff,
+    )
+
+    cfg = load_config()
+    events, views = _load_subscription_views(cfg)
+
+    source: Any = None
+    if from_plan:
+        source = next((v for v in views if v.plan_id == from_plan), None)
+        if source is None:
+            err_console.print(
+                f"[yellow]no subscription with plan_id={from_plan!r}; "
+                f"continuing without a source tool.[/yellow]"
+            )
+    elif events and views:
+        last_event = events[-1]
+        source = next(
+            (
+                v
+                for v in views
+                if v.provider == last_event.provider
+                and v.product == last_event.product
+                and v.account_id == last_event.account_id
+            ),
+            None,
+        )
+
+    target: Any = None
+    missing: list[str] = []
+    if task:
+        try:
+            table = load_routing_table()
+            result = recommend(task_id=task, table=table, subscriptions=views)
+            missing = list(result.missing_tools)
+            for candidate in result.recommendations:
+                if source is None or candidate.plan_id != source.plan_id:
+                    target = candidate
+                    break
+        except KeyError as exc:
+            err_console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        except Exception as exc:  # pragma: no cover
+            err_console.print(f"[red]failed to load routing table: {exc}[/red]")
+
+    brief = build_handoff(
+        generated_at=datetime.now(UTC),
+        events=events,
+        source_subscription=source,
+        target=target,
+        goal=goal,
+        max_events=max_events,
+        session_id=session,
+    )
+    rendered = render_handoff(brief, fmt=fmt)
+
+    if as_json:
+        console.print_json(
+            data={
+                "generated_at": brief.generated_at.isoformat(),
+                "goal": brief.goal,
+                "source": {
+                    "tool": brief.source_tool,
+                    "plan": brief.source_plan,
+                    "product": brief.source_product,
+                }
+                if brief.source_tool or brief.source_plan
+                else None,
+                "target": (
+                    {
+                        "tool_id": target.tool_id,
+                        "tool_display_name": target.tool_display_name,
+                        "plan_id": target.plan_id,
+                        "account_id": target.account_id,
+                        "tier": target.tier,
+                        "rationale": target.rationale,
+                    }
+                    if target is not None
+                    else None
+                ),
+                "events": [
+                    {
+                        "occurred_at": e.occurred_at.isoformat(),
+                        "provider": e.provider,
+                        "product": e.product,
+                        "model": e.model,
+                        "session_id": e.session_id,
+                        "project": e.project,
+                        "input_tokens": e.input_tokens,
+                        "output_tokens": e.output_tokens,
+                        "total_tokens": e.total_tokens,
+                    }
+                    for e in brief.events
+                ],
+                "reasons": list(brief.reasons),
+                "missing_tools": missing,
+                "rendered": rendered,
+                "format": fmt,
+            }
+        )
+        return
+
+    console.print(rendered, highlight=False)
 
 
 def _parse_iso(value: str) -> datetime | None:

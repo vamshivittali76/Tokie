@@ -1,0 +1,262 @@
+# task_routing.yaml — hand-tuned task -> tool preference matrix.
+#
+# Source of truth for the deterministic recommender in
+# ``tokie_cli.routing.recommender``. Community PRs keep it fresh; every
+# entry below is a human judgement, not a benchmark score.
+#
+# Shape:
+#   version: integer
+#   updated: ISO date string
+#   tools:     list of tool descriptors the routing table may reference
+#   task_types: map of task_type -> list of ranked recommendations
+#
+# A "tool" here is the *product* that actually answers the prompt
+# (claude-code, cursor-ide, perplexity-web, ...). It is deliberately
+# separate from "subscription" because several subscriptions often
+# satisfy the same tool (Claude Pro / Max 5x / Max 20x all run claude-code).
+#
+# The recommender matches each recommendation against the user's active
+# subscriptions via the ``products`` list: the first subscription whose
+# ``product`` appears in ``products`` (or whose window ``shared_with``
+# includes a listed product) is considered the usable route for that
+# recommendation.
+#
+# ``tier`` is 1 (best), 2 (solid fallback), 3 (last-resort). Within a tier
+# the recommender sorts by remaining capacity desc, so the user is nudged
+# toward the least-saturated subscription first.
+
+version: 1
+updated: 2026-04-20
+
+tools:
+  - id: claude-code
+    display_name: Claude Code
+    products: [claude-code]
+    notes: Anthropic's agentic CLI; best for multi-file refactors and long tasks.
+  - id: claude-web
+    display_name: Claude (web/desktop/mobile)
+    products: [claude-web, claude-desktop, claude-mobile]
+    notes: Same bucket as Claude Code for Pro/Max, but ergonomically nicer for chat-style work.
+  - id: cursor-ide
+    display_name: Cursor IDE
+    products: [cursor-ide]
+    notes: Strong inline-edit UX; premium-model requests are the metered resource.
+  - id: github-copilot
+    display_name: GitHub Copilot
+    products: [github-copilot, github-copilot-cli]
+    notes: Fast completions + CLI chat; best for boilerplate and shell commands.
+  - id: openai-api
+    display_name: OpenAI API
+    products: [openai-api]
+    notes: o-series / GPT-5 via raw API; pay-per-token but no hard quota ceiling.
+  - id: chatgpt-plus
+    display_name: ChatGPT (Plus/Pro)
+    products: [chatgpt-web]
+    notes: Consumer chat surface; counts against message caps.
+  - id: anthropic-api
+    display_name: Anthropic API
+    products: [anthropic-api]
+    notes: Opus/Sonnet/Haiku via API; no subscription ceiling, just spend.
+  - id: gemini-api
+    display_name: Gemini API
+    products: [gemini-api]
+    notes: 1M+ context window; ideal for whole-repo reads.
+  - id: gemini-web
+    display_name: Gemini (web/Advanced)
+    products: [gemini-web]
+    notes: Web chat; metered manually in v0.4.
+  - id: perplexity-web
+    display_name: Perplexity (web)
+    products: [perplexity-web]
+    notes: Research with citations; daily Pro Search and Deep Research caps.
+  - id: perplexity-api
+    display_name: Perplexity API
+    products: [perplexity-api]
+    notes: Programmatic research; sonar-* models.
+  - id: codex-cli
+    display_name: Codex CLI
+    products: [codex-cli]
+    notes: OpenAI's agentic CLI; billed against the underlying API key.
+  - id: mistral-le-chat
+    display_name: Mistral Le Chat
+    products: [le-chat-web]
+    notes: European-hosted chat; useful when EU data residency matters.
+
+task_types:
+  code_generation:
+    description: Writing new code from scratch (functions, modules, small apps).
+    preferred:
+      - tool: claude-code
+        tier: 1
+        rationale: Best overall quality for agentic multi-file edits.
+      - tool: cursor-ide
+        tier: 1
+        rationale: Inline diffs and repo-aware edits inside the editor.
+      - tool: codex-cli
+        tier: 2
+        rationale: Strong agentic CLI backed by GPT-5/o3.
+      - tool: openai-api
+        tier: 2
+        rationale: Raw access to the same reasoning models, no session cap.
+      - tool: github-copilot
+        tier: 3
+        rationale: Fast enough for boilerplate; weaker at long-horizon tasks.
+      - tool: claude-web
+        tier: 3
+        rationale: Manual copy-paste loop; only when CLIs are saturated.
+
+  code_review:
+    description: Reviewing diffs, spotting bugs, checking style.
+    preferred:
+      - tool: claude-code
+        tier: 1
+        rationale: Reads the repo, runs tools, and explains findings coherently.
+      - tool: anthropic-api
+        tier: 1
+        rationale: Same model family, fits larger diffs.
+      - tool: openai-api
+        tier: 2
+        rationale: o-series for deep reasoning on tricky reviews.
+      - tool: cursor-ide
+        tier: 2
+        rationale: Highlights issues inline in the editor.
+      - tool: github-copilot
+        tier: 3
+        rationale: Decent for quick "what does this do?" reviews.
+
+  debugging:
+    description: Diagnosing and fixing bugs from stack traces or failing tests.
+    preferred:
+      - tool: claude-code
+        tier: 1
+        rationale: Can run tests and iterate; full REPL loop.
+      - tool: codex-cli
+        tier: 1
+        rationale: Sibling CLI; good fallback when Claude is saturated.
+      - tool: cursor-ide
+        tier: 2
+        rationale: IDE awareness plus quick-fix actions.
+      - tool: openai-api
+        tier: 2
+        rationale: o-series reasoning for deep root-cause analysis.
+      - tool: claude-web
+        tier: 3
+        rationale: Manual paste of stack traces; slower loop.
+
+  refactoring:
+    description: Restructuring code without changing behaviour.
+    preferred:
+      - tool: claude-code
+        tier: 1
+        rationale: Preserves semantics across multi-file refactors.
+      - tool: cursor-ide
+        tier: 1
+        rationale: Named refactors and multi-file diffs inside the editor.
+      - tool: gemini-api
+        tier: 2
+        rationale: Large context for whole-package refactors.
+      - tool: openai-api
+        tier: 2
+        rationale: o-series for non-obvious architectural shifts.
+
+  documentation:
+    description: Writing or updating docs, docstrings, READMEs.
+    preferred:
+      - tool: claude-web
+        tier: 1
+        rationale: Pleasant chat UX for iterative prose.
+      - tool: claude-code
+        tier: 1
+        rationale: Can update docs in-tree and open PRs.
+      - tool: chatgpt-plus
+        tier: 2
+        rationale: Strong general prose; good with examples.
+      - tool: github-copilot
+        tier: 2
+        rationale: Fast docstring generation inline.
+      - tool: gemini-web
+        tier: 3
+        rationale: Useful when free/Advanced quota is still fresh.
+
+  research:
+    description: Gathering information, citing sources, exploring a topic.
+    preferred:
+      - tool: perplexity-web
+        tier: 1
+        rationale: Purpose-built for cited web research.
+      - tool: perplexity-api
+        tier: 1
+        rationale: Programmatic research with the same sonar models.
+      - tool: chatgpt-plus
+        tier: 2
+        rationale: Browsing + good synthesis.
+      - tool: gemini-web
+        tier: 2
+        rationale: Google search integration for freshness.
+      - tool: claude-web
+        tier: 3
+        rationale: No live web; fine for synthesising pasted material.
+
+  long_context:
+    description: Reading very large files, whole repos, or multi-hour transcripts.
+    preferred:
+      - tool: gemini-api
+        tier: 1
+        rationale: 1M+ token context window.
+      - tool: anthropic-api
+        tier: 1
+        rationale: 200K window is usually enough for single repos.
+      - tool: claude-code
+        tier: 2
+        rationale: Automatic context management via filesystem tools.
+      - tool: openai-api
+        tier: 3
+        rationale: Shorter window; only if the others are saturated.
+
+  quick_question:
+    description: Short Q&A, syntax lookups, explain-this-snippet.
+    preferred:
+      - tool: github-copilot
+        tier: 1
+        rationale: Lowest friction; stays inside the editor.
+      - tool: chatgpt-plus
+        tier: 1
+        rationale: Fast web chat; cheap on quota.
+      - tool: claude-web
+        tier: 2
+        rationale: Same speed, nicer formatting.
+      - tool: gemini-web
+        tier: 3
+        rationale: Free tier is often adequate for trivia.
+
+  data_analysis:
+    description: Exploring data, writing queries, visualising results.
+    preferred:
+      - tool: claude-code
+        tier: 1
+        rationale: Reads CSV/parquet, runs Python, and iterates.
+      - tool: openai-api
+        tier: 1
+        rationale: Code-interpreter-style loops via the API.
+      - tool: cursor-ide
+        tier: 2
+        rationale: Notebooks and SQL files with inline LLM.
+      - tool: chatgpt-plus
+        tier: 2
+        rationale: Advanced Data Analysis when paste-and-chat fits the task.
+
+  brainstorming:
+    description: Open-ended ideation where breadth beats precision.
+    preferred:
+      - tool: claude-web
+        tier: 1
+        rationale: Calibrated, does not collapse to one answer too fast.
+      - tool: chatgpt-plus
+        tier: 1
+        rationale: Broad surface area, strong at lateral connections.
+      - tool: gemini-web
+        tier: 2
+        rationale: Handy when you want a different house style.
+      - tool: mistral-le-chat
+        tier: 3
+        rationale: Nice non-US perspective; useful as a sanity check.
