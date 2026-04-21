@@ -409,7 +409,9 @@
           <p class="text-xs text-slate-500">input + output + reasoning tokens &nbsp;·&nbsp; cache reads shown in tooltips only</p>
         </div>
         <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-          <canvas id="daily-chart" class="!max-h-72"></canvas>
+          <div class="relative" style="height:288px">
+            <canvas id="daily-chart"></canvas>
+          </div>
         </div>
       </section>
 
@@ -417,7 +419,9 @@
       <section x-show="hasAnyData && payload.hourly_timeline?.length" class="space-y-3 fade-in">
         <h2 class="text-lg font-semibold">Last 7 days · hourly</h2>
         <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
-          <canvas id="timeline-chart" class="!max-h-72"></canvas>
+          <div class="relative" style="height:288px">
+            <canvas id="timeline-chart"></canvas>
+          </div>
         </div>
       </section>
 
@@ -543,13 +547,13 @@
             const stored = localStorage.getItem('tokie.theme');
             if (stored === 'light' || stored === 'dark') this.theme = stored;
           } catch (_e) { /* privacy mode */ }
-          // Defer chart render until after Alpine has processed x-show directives
-          // and made the canvas elements visible. Calling Chart.js on a
-          // display:none canvas produces a zero-dimension render (blank box).
-          this.$nextTick(() => {
+          // Double rAF: first frame lets Alpine flush x-show visibility, second
+          // frame fires after the browser has done a layout pass so the canvas
+          // wrapper div has real pixel dimensions for Chart.js to read.
+          requestAnimationFrame(() => requestAnimationFrame(() => {
             this.renderChart();
             this.renderTimeline();
-          });
+          }));
           this.refreshAlerts();
           this.refreshThresholds();
           this.refreshRouting();
@@ -566,7 +570,7 @@
         toggleTheme() {
           this.theme = this.theme === 'dark' ? 'light' : 'dark';
           try { localStorage.setItem('tokie.theme', this.theme); } catch (_e) { /* privacy mode */ }
-          this.$nextTick(() => { this.renderChart(); this.renderTimeline(); });
+          requestAnimationFrame(() => requestAnimationFrame(() => { this.renderChart(); this.renderTimeline(); }));
         },
         formatTpm(tpm) {
           if (tpm == null || !isFinite(tpm)) return '0 tok/min';
@@ -585,7 +589,7 @@
             if (res.ok) {
               this.payload = await res.json();
               this.lastUpdated = 'just now';
-              this.$nextTick(() => { this.renderChart(); this.renderTimeline(); });
+              requestAnimationFrame(() => requestAnimationFrame(() => { this.renderChart(); this.renderTimeline(); }));
             }
           } catch (_e) { /* ignore transient errors */ }
           finally { this.loading = false; }
@@ -600,21 +604,18 @@
           const cache     = bars.map(b => b.cache_read_tokens);
           const reasoning = bars.map(b => b.reasoning_tokens);
 
-          // Cache-read tokens are orders of magnitude larger than input+output
-          // (they represent re-used KV cache, not billed quota) and completely
-          // swamp the scale when stacked together. Render them on a hidden right
-          // axis so they appear in tooltips without distorting the main bars.
+          // cache_read_tokens are omitted from this chart — they peak at 10-20M
+          // vs ~500K for input+output, completely hiding the active-usage bars.
+          // Cache data is still available via the provider breakdown table below.
           if (this.chart) this.chart.destroy();
           this.chart = new Chart(canvas, {
             type: 'bar',
             data: {
               labels,
               datasets: [
-                { label: 'Input',      data: input,     backgroundColor: 'rgba(56, 189, 248, 0.85)', stack: 'tokens', yAxisID: 'y' },
-                { label: 'Output',     data: output,    backgroundColor: 'rgba(52, 211, 153, 0.85)', stack: 'tokens', yAxisID: 'y' },
-                { label: 'Reasoning',  data: reasoning, backgroundColor: 'rgba(251, 191, 36, 0.85)', stack: 'tokens', yAxisID: 'y' },
-                { label: 'Cache read', data: cache,     backgroundColor: 'rgba(148, 163, 184, 0.25)',
-                  type: 'bar', yAxisID: 'yCache', stack: 'cache', borderWidth: 0 },
+                { label: 'Input',     data: input,     backgroundColor: 'rgba(56,189,248,0.85)' },
+                { label: 'Output',    data: output,    backgroundColor: 'rgba(52,211,153,0.85)' },
+                { label: 'Reasoning', data: reasoning, backgroundColor: 'rgba(251,191,36,0.85)' },
               ],
             },
             options: {
@@ -630,12 +631,6 @@
                     color: this.axisColor(),
                     callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v,
                   },
-                  title: { display: true, text: 'active tokens', color: this.axisColor(), font: { size: 10 } },
-                },
-                yCache: {
-                  display: false,
-                  stacked: false,
-                  grid: { display: false },
                 },
               },
               plugins: {
@@ -644,7 +639,7 @@
                   callbacks: {
                     label(ctx) {
                       const v = ctx.raw || 0;
-                      const fmt = v >= 1e6 ? (v/1e6).toFixed(2)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : v;
+                      const fmt = v >= 1e6 ? (v/1e6).toFixed(2)+'M' : v >= 1000 ? (v/1000).toFixed(1)+'K' : String(v);
                       return ` ${ctx.dataset.label}: ${fmt}`;
                     },
                   },
