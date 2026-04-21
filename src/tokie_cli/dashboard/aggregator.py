@@ -108,16 +108,48 @@ class DailyBar:
 
 
 @dataclass(frozen=True)
+class HourlyPoint:
+    """One hourly bucket in the rolling burn-rate timeline."""
+
+    hour: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    events: int
+
+
+@dataclass(frozen=True)
+class BurnRate:
+    """Tokens-per-minute averaged over several rolling windows.
+
+    Units are ``tokens / minute`` so the UI can compare against the plan's
+    per-window limit (which the plans.yaml file denominates in tokens or
+    messages). ``projection_hours`` is ``None`` when the burn rate is zero;
+    otherwise it's the number of hours until the *least-slack* window
+    exhausts at this rate, computed in :func:`build_burn_rate`.
+    """
+
+    window_label: str
+    window_minutes: int
+    total_tokens: int
+    events: int
+    tokens_per_minute: float
+
+
+@dataclass(frozen=True)
 class DashboardPayload:
     """Top-level payload served by ``GET /api/status``."""
 
     generated_at: datetime
     event_count: int
     subscription_count: int
+    accounts: tuple[str, ...]
     provider_breakdown: tuple[dict[str, Any], ...]
     subscriptions: tuple[SubscriptionView, ...]
     recent_events: tuple[RecentEventView, ...]
     daily_bars: tuple[DailyBar, ...]
+    hourly_timeline: tuple[HourlyPoint, ...]
+    burn_rate: tuple[BurnRate, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +486,96 @@ def build_provider_breakdown(events: Sequence[UsageEvent]) -> tuple[dict[str, An
     )
 
 
+_HOURLY_WINDOW_HOURS = 168  # 7 days
+_BURN_RATE_WINDOWS: tuple[tuple[str, int], ...] = (
+    ("1h", 60),
+    ("6h", 360),
+    ("24h", 1440),
+)
+
+
+def build_hourly_timeline(
+    events: Sequence[UsageEvent],
+    *,
+    now: datetime,
+    hours_back: int = _HOURLY_WINDOW_HOURS,
+) -> tuple[HourlyPoint, ...]:
+    """Per-hour token totals for the last ``hours_back`` hours (UTC)."""
+
+    top_of_hour = now.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    hours = [top_of_hour - timedelta(hours=i) for i in range(hours_back - 1, -1, -1)]
+    buckets: dict[str, dict[str, int]] = {
+        h.isoformat(): {"input_tokens": 0, "output_tokens": 0, "events": 0} for h in hours
+    }
+
+    for evt in events:
+        bucket_key = (
+            evt.occurred_at.astimezone(UTC)
+            .replace(minute=0, second=0, microsecond=0)
+            .isoformat()
+        )
+        if bucket_key not in buckets:
+            continue
+        bucket = buckets[bucket_key]
+        bucket["input_tokens"] += evt.input_tokens
+        bucket["output_tokens"] += evt.output_tokens
+        bucket["events"] += 1
+
+    return tuple(
+        HourlyPoint(
+            hour=key,
+            input_tokens=counts["input_tokens"],
+            output_tokens=counts["output_tokens"],
+            total_tokens=counts["input_tokens"] + counts["output_tokens"],
+            events=counts["events"],
+        )
+        for key, counts in buckets.items()
+    )
+
+
+def build_burn_rate(
+    events: Sequence[UsageEvent],
+    *,
+    now: datetime,
+) -> tuple[BurnRate, ...]:
+    """Compute token throughput across rolling windows (1h, 6h, 24h)."""
+
+    ref = now.astimezone(UTC)
+    out: list[BurnRate] = []
+    for label, minutes in _BURN_RATE_WINDOWS:
+        cutoff = ref - timedelta(minutes=minutes)
+        total = 0
+        count = 0
+        for evt in events:
+            if evt.occurred_at.astimezone(UTC) >= cutoff:
+                total += evt.input_tokens + evt.output_tokens
+                count += 1
+        out.append(
+            BurnRate(
+                window_label=label,
+                window_minutes=minutes,
+                total_tokens=total,
+                events=count,
+                tokens_per_minute=(total / minutes) if minutes > 0 else 0.0,
+            )
+        )
+    return tuple(out)
+
+
+def _collect_accounts(events: Sequence[UsageEvent]) -> tuple[str, ...]:
+    """Sorted distinct ``account_id`` values observed in events.
+
+    Feeds the dashboard's account switcher dropdown so users with multiple
+    logins see a filter. The default sort is alphabetical; "default" sorts
+    to the top when present because that's the single-account common case.
+    """
+
+    accounts = {evt.account_id for evt in events}
+    if "default" in accounts:
+        return ("default", *sorted(a for a in accounts if a != "default"))
+    return tuple(sorted(accounts))
+
+
 def build_payload(
     bindings: Sequence[SubscriptionBinding],
     plans: Sequence[PlanTemplate],
@@ -462,6 +584,7 @@ def build_payload(
     now: datetime,
     recent_limit: int = _DEFAULT_RECENT_LIMIT,
     days_back: int = _DEFAULT_DAYS_BACK,
+    hours_back: int = _HOURLY_WINDOW_HOURS,
 ) -> DashboardPayload:
     """Combine every view-builder into the single JSON payload the UI fetches."""
 
@@ -469,24 +592,33 @@ def build_payload(
     recent = build_recent_events(events, limit=recent_limit)
     bars = build_daily_bars(events, now=now, days_back=days_back)
     provider = build_provider_breakdown(events)
+    timeline = build_hourly_timeline(events, now=now, hours_back=hours_back)
+    burn = build_burn_rate(events, now=now)
     return DashboardPayload(
         generated_at=now,
         event_count=len(events),
         subscription_count=len(subscriptions),
+        accounts=_collect_accounts(events),
         provider_breakdown=provider,
         subscriptions=subscriptions,
         recent_events=recent,
         daily_bars=bars,
+        hourly_timeline=timeline,
+        burn_rate=burn,
     )
 
 
 __all__ = [
+    "BurnRate",
     "DailyBar",
     "DashboardPayload",
+    "HourlyPoint",
     "RecentEventView",
     "SubscriptionView",
     "WindowView",
+    "build_burn_rate",
     "build_daily_bars",
+    "build_hourly_timeline",
     "build_payload",
     "build_provider_breakdown",
     "build_recent_events",

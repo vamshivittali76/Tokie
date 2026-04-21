@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950">
+<html lang="en" class="h-full" x-data="tokieDashboard()" x-init="init()" :class="theme === 'light' ? 'bg-slate-50' : 'bg-slate-950'">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -26,21 +26,23 @@
       background: transparent;
       box-sizing: border-box;
     }
-    .ring-exact    { --ring-rgb: 52 211 153;   color: rgb(52 211 153); }   /* emerald-400 */
-    .ring-estimated{ --ring-rgb: 251 191 36;   color: rgb(251 191 36); }   /* amber-400 */
-    .ring-inferred { --ring-rgb: 148 163 184;  color: rgb(148 163 184); }  /* slate-400 */
+    .ring-exact    { --ring-rgb: 52 211 153;   color: rgb(52 211 153); }
+    .ring-estimated{ --ring-rgb: 251 191 36;   color: rgb(251 191 36); }
+    .ring-inferred { --ring-rgb: 148 163 184;  color: rgb(148 163 184); }
 
-    /* Minimal animations so the polling refresh is not jarring. */
     .fade-in { animation: fade 0.3s ease; }
     @keyframes fade { from { opacity: 0.6 } to { opacity: 1 } }
+
+    /* Light-mode overrides — body class toggles between .theme-dark and .theme-light. */
+    .theme-light { background-color: #f8fafc; color: #0f172a; }
+    .theme-light .panel { background-color: #ffffff; border-color: #e2e8f0; }
+    .theme-light .muted { color: #475569; }
+    .theme-light table thead { background-color: #f1f5f9; color: #334155; }
+    .theme-light tbody tr:hover { background-color: #f8fafc; }
   </style>
 </head>
-<body class="h-full text-slate-100 font-sans antialiased">
-  <div
-    x-data="tokieDashboard()"
-    x-init="init()"
-    class="min-h-full flex flex-col"
-  >
+<body class="h-full font-sans antialiased" :class="theme === 'light' ? 'theme-light' : 'text-slate-100'">
+  <div class="min-h-full flex flex-col">
     <!-- ============================ HEADER ============================ -->
     <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
       <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -55,14 +57,35 @@
           </div>
         </div>
         <div class="flex items-center gap-2">
+          <select
+            x-show="payload.accounts?.length > 1"
+            x-model="accountFilter"
+            class="px-2 py-1.5 text-xs rounded-md bg-slate-800 text-slate-200 border border-slate-700"
+            :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300' : ''"
+          >
+            <option value="all">all accounts</option>
+            <template x-for="acct in payload.accounts" :key="acct">
+              <option :value="acct" x-text="acct"></option>
+            </template>
+          </select>
+          <button
+            @click="toggleTheme()"
+            class="px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700"
+            :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100' : ''"
+            :title="'theme: ' + theme"
+          >
+            <span x-show="theme === 'dark'">dark</span>
+            <span x-show="theme === 'light'">light</span>
+          </button>
           <button
             @click="refresh()"
             class="px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700"
+            :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100' : ''"
           >
             <span x-show="!loading">Refresh</span>
             <span x-show="loading">Refreshing…</span>
           </button>
-          <label class="flex items-center gap-2 text-xs text-slate-400">
+          <label class="flex items-center gap-2 text-xs" :class="theme === 'light' ? 'text-slate-600' : 'text-slate-400'">
             <input type="checkbox" x-model="autoRefresh" class="accent-emerald-500" />
             auto-refresh
           </label>
@@ -85,6 +108,22 @@
         </section>
       </template>
 
+      <!-- ============================ BURN RATE ============================ -->
+      <section x-show="hasAnyData && payload.burn_rate?.length" class="fade-in">
+        <div class="grid sm:grid-cols-3 gap-3">
+          <template x-for="br in payload.burn_rate" :key="br.window_label">
+            <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+              <p class="text-[11px] uppercase tracking-wider muted text-slate-500">Burn rate · last <span x-text="br.window_label"></span></p>
+              <p class="text-xl font-semibold mt-1" x-text="formatTpm(br.tokens_per_minute)"></p>
+              <p class="text-xs muted text-slate-400">
+                <span x-text="br.total_tokens.toLocaleString()"></span> tokens,
+                <span x-text="br.events"></span> events
+              </p>
+            </div>
+          </template>
+        </div>
+      </section>
+
       <!-- ============================ SUBSCRIPTIONS ============================ -->
       <section x-show="payload.subscriptions?.length" class="space-y-3 fade-in">
         <div class="flex items-end justify-between">
@@ -95,7 +134,7 @@
         </div>
 
         <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <template x-for="sub in payload.subscriptions" :key="sub.plan_id + '@' + sub.account_id">
+          <template x-for="sub in visibleSubscriptions" :key="sub.plan_id + '@' + sub.account_id">
             <article
               :class="'rounded-xl border border-slate-800 bg-slate-900/60 p-5 space-y-4 ring-' + sub.confidence"
             >
@@ -161,8 +200,16 @@
       <!-- ============================ DAILY CHART ============================ -->
       <section x-show="hasAnyData" class="space-y-3 fade-in">
         <h2 class="text-lg font-semibold">Last 14 days</h2>
-        <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+        <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
           <canvas id="daily-chart" class="!max-h-72"></canvas>
+        </div>
+      </section>
+
+      <!-- ============================ HOURLY TIMELINE ============================ -->
+      <section x-show="hasAnyData && payload.hourly_timeline?.length" class="space-y-3 fade-in">
+        <h2 class="text-lg font-semibold">Last 7 days · hourly</h2>
+        <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <canvas id="timeline-chart" class="!max-h-72"></canvas>
         </div>
       </section>
 
@@ -263,11 +310,24 @@
         autoRefresh: true,
         lastUpdated: 'just now',
         chart: null,
+        timelineChart: null,
+        theme: 'dark',
+        accountFilter: 'all',
         get hasAnyData() {
           return (this.payload?.event_count || 0) > 0;
         },
+        get visibleSubscriptions() {
+          const subs = this.payload?.subscriptions || [];
+          if (!this.accountFilter || this.accountFilter === 'all') return subs;
+          return subs.filter(s => s.account_id === this.accountFilter);
+        },
         init() {
+          try {
+            const stored = localStorage.getItem('tokie.theme');
+            if (stored === 'light' || stored === 'dark') this.theme = stored;
+          } catch (_e) { /* privacy mode */ }
           this.renderChart();
+          this.renderTimeline();
           setInterval(() => {
             this.lastUpdated = this.humanize(new Date(this.payload.generated_at));
           }, 30000);
@@ -275,6 +335,21 @@
             if (this.autoRefresh) this.refresh();
           }, 10000);
         },
+        toggleTheme() {
+          this.theme = this.theme === 'dark' ? 'light' : 'dark';
+          try { localStorage.setItem('tokie.theme', this.theme); } catch (_e) { /* privacy mode */ }
+          this.renderChart();
+          this.renderTimeline();
+        },
+        formatTpm(tpm) {
+          if (tpm == null || !isFinite(tpm)) return '0 tok/min';
+          if (tpm < 1) return `${tpm.toFixed(2)} tok/min`;
+          if (tpm < 1000) return `${Math.round(tpm)} tok/min`;
+          return `${(tpm / 1000).toFixed(1)}k tok/min`;
+        },
+        axisColor() { return this.theme === 'light' ? '#334155' : '#94a3b8'; },
+        gridColor() { return this.theme === 'light' ? 'rgba(15,23,42,0.08)' : 'rgba(148,163,184,0.1)'; },
+        legendColor() { return this.theme === 'light' ? '#1e293b' : '#cbd5e1'; },
         async refresh() {
           if (this.loading) return;
           this.loading = true;
@@ -284,6 +359,7 @@
               this.payload = await res.json();
               this.lastUpdated = 'just now';
               this.renderChart();
+              this.renderTimeline();
             }
           } catch (_e) { /* ignore transient errors */ }
           finally { this.loading = false; }
@@ -314,12 +390,44 @@
               responsive: true,
               maintainAspectRatio: false,
               scales: {
-                x: { stacked: true, grid: { display: false }, ticks: { color: '#94a3b8' } },
-                y: { stacked: true, grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { color: '#94a3b8' } },
+                x: { stacked: true, grid: { display: false }, ticks: { color: this.axisColor() } },
+                y: { stacked: true, grid: { color: this.gridColor() }, ticks: { color: this.axisColor() } },
               },
               plugins: {
-                legend: { labels: { color: '#cbd5e1' } },
+                legend: { labels: { color: this.legendColor() } },
               },
+            },
+          });
+        },
+        renderTimeline() {
+          const canvas = document.getElementById('timeline-chart');
+          if (!canvas) return;
+          const timeline = this.payload.hourly_timeline || [];
+          const labels = timeline.map(h => h.hour.slice(5, 13).replace('T', ' '));
+          const totals = timeline.map(h => h.total_tokens);
+          if (this.timelineChart) this.timelineChart.destroy();
+          this.timelineChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+              labels,
+              datasets: [{
+                label: 'Tokens / hour',
+                data: totals,
+                fill: true,
+                borderColor: 'rgba(52, 211, 153, 0.9)',
+                backgroundColor: 'rgba(52, 211, 153, 0.15)',
+                pointRadius: 0,
+                tension: 0.3,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                x: { grid: { display: false }, ticks: { color: this.axisColor(), maxTicksLimit: 12 } },
+                y: { grid: { color: this.gridColor() }, ticks: { color: this.axisColor() } },
+              },
+              plugins: { legend: { labels: { color: this.legendColor() } } },
             },
           });
         },

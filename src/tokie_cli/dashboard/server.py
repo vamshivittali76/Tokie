@@ -166,6 +166,21 @@ def create_app(
         payload = _build(state)
         return {"bars": _to_jsonable(payload.daily_bars)}
 
+    @app.get("/api/timeline", response_class=JSONResponse)
+    def timeline(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        payload = _build(state)
+        return {"timeline": _to_jsonable(payload.hourly_timeline)}
+
+    @app.get("/api/burn-rate", response_class=JSONResponse)
+    def burn_rate(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        payload = _build(state)
+        return {"burn_rate": _to_jsonable(payload.burn_rate)}
+
+    @app.get("/api/accounts", response_class=JSONResponse)
+    def accounts(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        payload = _build(state)
+        return {"accounts": list(payload.accounts)}
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, state: AppState = Depends(get_state)) -> HTMLResponse:
         """Single-page dashboard. Client JS fetches /api/status on mount."""

@@ -11,7 +11,9 @@ import pytest
 
 from tokie_cli.config import SubscriptionBinding
 from tokie_cli.dashboard.aggregator import (
+    build_burn_rate,
     build_daily_bars,
+    build_hourly_timeline,
     build_payload,
     build_provider_breakdown,
     build_recent_events,
@@ -294,3 +296,41 @@ def test_build_payload_fills_every_section() -> None:
     assert len(payload.daily_bars) == 14
     assert len(payload.recent_events) == 2
     assert len(payload.provider_breakdown) == 1
+    assert len(payload.hourly_timeline) == 168
+    assert len(payload.burn_rate) == 3
+    assert payload.accounts == ("default",)
+
+
+def test_hourly_timeline_buckets_events_into_correct_hours() -> None:
+    events = [
+        _event(when=NOW - timedelta(minutes=30), input_tokens=100),
+        _event(when=NOW - timedelta(hours=1, minutes=15), input_tokens=200),
+        _event(when=NOW - timedelta(days=10), input_tokens=99),  # outside 7d window
+    ]
+    timeline = build_hourly_timeline(events, now=NOW, hours_back=24)
+    assert len(timeline) == 24
+    # Sum of totals in-window should match the two recent events' tokens.
+    assert sum(t.total_tokens for t in timeline) == 100 + 50 + 200 + 50
+
+
+def test_burn_rate_three_windows_and_tokens_per_minute() -> None:
+    events = [
+        _event(when=NOW - timedelta(minutes=10), input_tokens=600, output_tokens=0),
+        _event(when=NOW - timedelta(minutes=30), input_tokens=600, output_tokens=0),
+    ]
+    burn = build_burn_rate(events, now=NOW)
+    assert [b.window_label for b in burn] == ["1h", "6h", "24h"]
+    one_hour = burn[0]
+    assert one_hour.total_tokens == 1200
+    assert one_hour.tokens_per_minute == pytest.approx(1200 / 60)
+
+
+def test_accounts_puts_default_first() -> None:
+    events = [
+        _event(when=NOW, account_id="zulu"),
+        _event(when=NOW, account_id="alpha"),
+        _event(when=NOW, account_id="default"),
+    ]
+    payload = build_payload([], [], events, now=NOW)
+    assert payload.accounts == ("default", "alpha", "zulu")
+

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-20
+
+Week 2 of the build-in-public run: expand collector coverage, ship a live
+terminal UI, and extend the dashboard with historical timeline, burn-rate,
+multi-account switcher, and light/dark theme toggle. All feature flags
+stay off-by-default; nothing about v0.1.0 breaks.
+
+### Added
+- **`github-copilot-cli` collector** (`src/tokie_cli/collectors/copilot_cli.py`): tails local NDJSON from `~/.config/github-copilot/history/`, `~/.copilot/history/`, and `%APPDATA%/GitHub Copilot/history/` (override via `TOKIE_COPILOT_LOG`). Parses both `prompt_tokens`/`completion_tokens` and `input_tokens`/`output_tokens` shapes. `EXACT` confidence.
+- **`perplexity-api` collector** (`src/tokie_cli/collectors/perplexity_api.py`): log-tail collector for user-provided Perplexity response drops (vendor has no public historical usage endpoint; the keyring slot `tokie-perplexity/api_key` is reserved for a future HTTP path). Health surfaces a loud `vendor gap` warning when a key is stored but no drops exist yet.
+- **`cursor-ide` collector** (`src/tokie_cli/collectors/cursor_ide.py`): feature-flagged drop-ingest collector. Reads either Cursor's dashboard CSV export (`ESTIMATED` confidence — token counts are derived from a fixed heuristic since the vendor CSV omits them) or user-supplied NDJSON with real `usage` blocks (`EXACT`). Loud warning in `tokie doctor` about the `ESTIMATED` tier and the vendor's lack of a public usage API.
+- **`tokie watch` Textual TUI** (`src/tokie_cli/tui.py`): live per-subscription progress bars, confidence-tier glyphs (solid / shaded / dashed to mirror the dashboard), 24-hour sparkline per subscription, human-readable reset countdowns, `q` to quit and `r` to refresh. Reuses the existing aggregator so the TUI and web surface never drift.
+- **Dashboard v2** (`src/tokie_cli/dashboard/aggregator.py`, `src/tokie_cli/dashboard/server.py`, `src/tokie_cli/dashboard/templates/index.html`):
+  - Hourly timeline (last 7 days) rendered as a Chart.js line chart.
+  - Rolling burn-rate chips (`1h` / `6h` / `24h`) in tokens/minute.
+  - Multi-account switcher dropdown that filters subscription cards client-side (only shown when more than one `account_id` is present).
+  - Light/dark theme toggle persisted in `localStorage` (`tokie.theme`).
+  - New API endpoints: `GET /api/timeline`, `GET /api/burn-rate`, `GET /api/accounts`.
+- New tests: `tests/test_collectors_copilot_cli.py`, `tests/test_collectors_perplexity_api.py`, `tests/test_collectors_cursor_ide.py`, `tests/test_tui.py`. Existing dashboard tests extended with burn-rate / timeline / account-list assertions. 252 tests passing, 0 mypy --strict errors.
+
+### Changed
+- `src/tokie_cli/cli.py` registers three new collectors in `_COLLECTOR_REGISTRY` so `tokie scan`, `tokie doctor`, and `tokie init` pick them up automatically. Adds the new `tokie watch` command.
+- `DashboardPayload` now includes `accounts`, `hourly_timeline`, and `burn_rate`. Consumers that ignored unknown fields already stayed compatible; anything that asserted shape explicitly should see additive-only changes.
+
+### Notes
+- Gemini CLI coverage was already delivered in `api_gemini` (Day 3); Week 2's "Gemini CLI collector" is considered shipped in v0.1.0 and is not duplicated here.
+- No collector sends a network request without an explicit credential in the keyring — every new collector is local-file-only by default.
+
 ## [0.1.0] — 2026-04-20
 
 First public release. Delivers the core spec from

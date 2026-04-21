@@ -34,7 +34,10 @@ from tokie_cli.collectors.api_openai import OpenAIAPICollector
 from tokie_cli.collectors.api_openai_compatible import OpenAICompatibleCollector
 from tokie_cli.collectors.claude_code import ClaudeCodeCollector
 from tokie_cli.collectors.codex import CodexCollector
+from tokie_cli.collectors.copilot_cli import CopilotCLICollector
+from tokie_cli.collectors.cursor_ide import CursorIDECollector
 from tokie_cli.collectors.manual import ManualCollector
+from tokie_cli.collectors.perplexity_api import PerplexityAPICollector
 from tokie_cli.config import (
     CollectorConfig,
     config_dir,
@@ -64,6 +67,9 @@ _COLLECTOR_REGISTRY: dict[str, type[Collector]] = {
     OpenAIAPICollector.name: OpenAIAPICollector,
     GeminiAPICollector.name: GeminiAPICollector,
     OpenAICompatibleCollector.name: OpenAICompatibleCollector,
+    CopilotCLICollector.name: CopilotCLICollector,
+    PerplexityAPICollector.name: PerplexityAPICollector,
+    CursorIDECollector.name: CursorIDECollector,
     ManualCollector.name: ManualCollector,
 }
 
@@ -546,6 +552,23 @@ def dashboard(
         run_server(host=host, port=port, allow_remote=remote, config=cfg_with_bind)
     except KeyboardInterrupt:  # pragma: no cover - interactive only
         console.print("[dim]dashboard stopped[/dim]")
+
+
+@app.command()
+def watch() -> None:
+    """Launch the live TUI — per-subscription bars, sparklines, reset countdowns."""
+
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        err_console.print(
+            "[yellow]no database yet; run 'tokie init' and 'tokie scan' first[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    # Importing here avoids paying Textual's import cost on every `tokie`
+    # invocation (it pulls in most of rich's optional UI stack).
+    from tokie_cli.tui import run_watch
+
+    run_watch(config=cfg)
 
 
 def _parse_iso(value: str) -> datetime | None:
