@@ -1,16 +1,20 @@
 version: 1
-updated: 2026-04-20
+updated: 2026-04-21
 # Every entry carries a `trackability` tier so the dashboard can render
 # untrackable web-only tools with the correct INFERRED badge and route
 # them to the manual-entry workflow.
 #   local_exact      — parsed from a vendor's own on-disk log
 #   api_exact        — pulled from a vendor admin/usage endpoint
 #   web_only_manual  — no local signal; user enters usage through `manual` collector
+#
+# `monthly_price_usd` is the standard monthly price in USD (omit for pay-as-you-go).
+# Prices as of 2026-04-21; update when vendors change pricing.
 plans:
   - id: claude_pro_personal
     trackability: local_exact
     display_name: Claude Pro
     source_url: https://www.anthropic.com/pricing
+    monthly_price_usd: 20.0
     notes: Shared bucket across claude-code, claude-web, claude-desktop, claude-mobile.
     subscription:
       id: claude_pro_personal
@@ -30,6 +34,7 @@ plans:
     trackability: local_exact
     display_name: Claude Max 5x
     source_url: https://www.anthropic.com/max
+    monthly_price_usd: 100.0
     notes: 5x Pro allowance on the same shared bucket.
     subscription:
       id: claude_max5_personal
@@ -49,6 +54,7 @@ plans:
     trackability: local_exact
     display_name: Claude Max 20x
     source_url: https://www.anthropic.com/max
+    monthly_price_usd: 200.0
     notes: 20x Pro allowance.
     subscription:
       id: claude_max20_personal
@@ -127,7 +133,8 @@ plans:
     trackability: web_only_manual
     display_name: ChatGPT Plus
     source_url: https://openai.com/chatgpt/pricing/
-    notes: Not locally trackable in v0.1 (web-only). Included so the UI can show it as INFERRED when users manually log usage.
+    monthly_price_usd: 20.0
+    notes: Not locally trackable (web-only). Included so the UI can show it as INFERRED when users manually log usage.
     subscription:
       id: chatgpt_plus_personal
       provider: openai
@@ -142,7 +149,8 @@ plans:
     trackability: local_exact
     display_name: Cursor Pro
     source_url: https://cursor.com/pricing
-    notes: Monthly premium-model request allowance for individual Pro.
+    monthly_price_usd: 20.0
+    notes: Monthly premium-model request allowance for individual Pro. Auto-read from local state.vscdb.
     subscription:
       id: cursor_pro_personal
       provider: cursor
@@ -157,6 +165,7 @@ plans:
     trackability: web_only_manual
     display_name: Perplexity Pro
     source_url: https://www.perplexity.ai/hub/faq/what-is-perplexity-pro
+    monthly_price_usd: 20.0
     notes: Pro Searches and Deep Research are daily-quotaed; web-only, no local signal.
     subscription:
       id: perplexity_pro_personal
@@ -176,6 +185,7 @@ plans:
     trackability: web_only_manual
     display_name: ChatGPT Pro
     source_url: https://openai.com/chatgpt/pricing/
+    monthly_price_usd: 200.0
     notes: Unlimited GPT-5 access; web-only, no local signal.
     subscription:
       id: chatgpt_pro_personal
@@ -190,6 +200,7 @@ plans:
     trackability: web_only_manual
     display_name: Gemini Advanced (Google One AI Premium)
     source_url: https://one.google.com/about/ai-premium/
+    monthly_price_usd: 20.0
     notes: Gemini 2.5 Pro in the web app and Workspace apps; web-only, no local signal.
     subscription:
       id: gemini_advanced_personal
@@ -219,6 +230,7 @@ plans:
     trackability: web_only_manual
     display_name: Mistral Le Chat Pro
     source_url: https://chat.mistral.ai/
+    monthly_price_usd: 15.0
     notes: Mistral's consumer chat; web-only, no local signal.
     subscription:
       id: mistral_le_chat_pro
@@ -247,6 +259,7 @@ plans:
     trackability: web_only_manual
     display_name: X Premium+ (Grok)
     source_url: https://x.ai/grok
+    monthly_price_usd: 50.0
     notes: Grok via X Premium+; web-only, no local signal.
     subscription:
       id: grok_premium_plus
@@ -265,6 +278,7 @@ plans:
     trackability: web_only_manual
     display_name: Manus
     source_url: https://manus.im/
+    monthly_price_usd: 39.9
     notes: Task-based autonomous agent; web-only, no local signal.
     subscription:
       id: manus_personal
@@ -279,6 +293,7 @@ plans:
     trackability: web_only_manual
     display_name: Devin (Cognition)
     source_url: https://devin.ai/pricing
+    monthly_price_usd: 500.0
     notes: Autonomous engineer billed in ACU (Agent Compute Units); web-only, no local signal.
     subscription:
       id: devin_team
@@ -294,6 +309,7 @@ plans:
     trackability: web_only_manual
     display_name: WisperFlow Pro
     source_url: https://wisprflow.ai/
+    monthly_price_usd: 20.0
     notes: Voice-to-text AI dictation; web-only, no local signal.
     subscription:
       id: wisperflow_pro
@@ -308,6 +324,7 @@ plans:
     trackability: web_only_manual
     display_name: v0 by Vercel (Premium)
     source_url: https://v0.dev/pricing
+    monthly_price_usd: 20.0
     notes: Credit-based UI generation; web-only, no local signal.
     subscription:
       id: v0_premium
@@ -323,6 +340,7 @@ plans:
     trackability: web_only_manual
     display_name: bolt.new Pro
     source_url: https://bolt.new/
+    monthly_price_usd: 20.0
     notes: Token-based full-stack app generator; web-only, no local signal.
     subscription:
       id: bolt_pro
@@ -337,6 +355,7 @@ plans:
     trackability: web_only_manual
     display_name: Lovable Pro
     source_url: https://lovable.dev/pricing
+    monthly_price_usd: 25.0
     notes: Credit-based app builder; web-only, no local signal.
     subscription:
       id: lovable_pro
@@ -373,7 +392,7 @@ plans:
     trackability: local_exact
     display_name: OpenAI Codex (CLI, included with ChatGPT Plus/Pro)
     source_url: https://openai.com/codex/
-    notes: Session caps vary by ChatGPT tier; tracked via ~/.codex/sessions rollouts.
+    notes: Session caps vary by ChatGPT tier; tracked via ~/.codex/sessions rollouts. No additional monthly cost beyond ChatGPT subscription.
     subscription:
       id: codex_cli_with_chatgpt
       provider: openai

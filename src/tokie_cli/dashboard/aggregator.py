@@ -60,6 +60,9 @@ class SubscriptionView:
     ``confidence`` is the *weakest* confidence across events that contributed
     to any of this subscription's windows — so a single INFERRED event never
     gets silently upgraded to EXACT by a solid bar next to it.
+
+    ``monthly_price_usd`` is taken directly from :attr:`PlanTemplate.monthly_price_usd`
+    and is ``None`` for pay-as-you-go plans with no flat monthly fee.
     """
 
     plan_id: str
@@ -72,6 +75,7 @@ class SubscriptionView:
     confidence: str
     event_count: int
     windows: tuple[WindowView, ...]
+    monthly_price_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,7 @@ class DashboardPayload:
     generated_at: datetime
     event_count: int
     subscription_count: int
+    total_monthly_spend_usd: float
     accounts: tuple[str, ...]
     provider_breakdown: tuple[dict[str, Any], ...]
     subscriptions: tuple[SubscriptionView, ...]
@@ -354,6 +359,7 @@ def build_subscription_views(
                 confidence=confidence.value,
                 event_count=contributing_count,
                 windows=tuple(window_views),
+                monthly_price_usd=plan.monthly_price_usd,
             )
         )
     return tuple(out)
@@ -594,10 +600,14 @@ def build_payload(
     provider = build_provider_breakdown(events)
     timeline = build_hourly_timeline(events, now=now, hours_back=hours_back)
     burn = build_burn_rate(events, now=now)
+    total_monthly_spend = sum(
+        s.monthly_price_usd for s in subscriptions if s.monthly_price_usd is not None
+    )
     return DashboardPayload(
         generated_at=now,
         event_count=len(events),
         subscription_count=len(subscriptions),
+        total_monthly_spend_usd=total_monthly_spend,
         accounts=_collect_accounts(events),
         provider_breakdown=provider,
         subscriptions=subscriptions,

@@ -75,6 +75,11 @@ class PlanTemplate:
     ``subscription`` is already validated against
     :class:`tokie_cli.schema.Subscription`, so consumers can treat it as a
     trusted source of truth without re-validating.
+
+    ``monthly_price_usd`` is the regular monthly price of the subscription
+    in USD (``None`` for pay-as-you-go / API plans with no flat fee).
+    It is surfaced as-is in the dashboard; Tokie makes no claim about taxes,
+    discounts, or regional pricing differences.
     """
 
     id: str
@@ -83,6 +88,7 @@ class PlanTemplate:
     notes: str | None
     subscription: Subscription
     trackability: Trackability = Trackability.LOCAL_EXACT
+    monthly_price_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +292,15 @@ def load_plans(path: Path | str | None = None) -> list[PlanTemplate]:
         except ValidationError as exc:
             raise PlansFileError(f"Plan '{plan_id}' has an invalid subscription: {exc}") from exc
 
+        monthly_price_raw = entry.get("monthly_price_usd")
+        monthly_price: float | None = None
+        if monthly_price_raw is not None:
+            if not isinstance(monthly_price_raw, (int, float)):
+                raise PlansFileError(
+                    f"Plan '{plan_id}' has a non-numeric 'monthly_price_usd' field."
+                )
+            monthly_price = float(monthly_price_raw)
+
         templates.append(
             PlanTemplate(
                 id=plan_id_obj,
@@ -294,6 +309,7 @@ def load_plans(path: Path | str | None = None) -> list[PlanTemplate]:
                 notes=notes_value,
                 subscription=subscription,
                 trackability=trackability,
+                monthly_price_usd=monthly_price,
             )
         )
 
