@@ -13,6 +13,7 @@ strategy": community PRs keep the file fresh, every entry carries a
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
@@ -25,13 +26,26 @@ from tokie_cli.schema import Subscription
 
 __all__ = [
     "DEFAULT_PLANS_FILENAME",
+    "PLANS_FRESHNESS_WARN_DAYS",
     "PlanTemplate",
     "PlansFileError",
+    "PlansMetadata",
     "Trackability",
     "bundled_plans_path",
     "get_plan",
     "load_plans",
+    "load_plans_metadata",
 ]
+
+PLANS_FRESHNESS_WARN_DAYS: int = 60
+"""Threshold past which :func:`load_plans_metadata` flags the file as stale.
+
+Vendor plan limits shift every few months (context windows bump, weekly
+message caps get rewritten) and an old ``plans.yaml`` silently produces
+wrong saturation numbers. Sixty days is long enough to avoid false
+alarms from the normal PR cadence and short enough to nudge users to
+``pip install -U tokie-cli`` before ratios drift.
+"""
 
 
 class Trackability(StrEnum):
@@ -69,6 +83,102 @@ class PlanTemplate:
     notes: str | None
     subscription: Subscription
     trackability: Trackability = Trackability.LOCAL_EXACT
+
+
+@dataclass(frozen=True)
+class PlansMetadata:
+    """Lightweight header info from a ``plans.yaml`` file.
+
+    Extracted separately from :func:`load_plans` so callers that only
+    need the freshness signal (``tokie doctor``) don't pay the cost of
+    validating every subscription entry.
+    """
+
+    version: int
+    updated: date
+    path: Path
+    plan_count: int
+    age_days: int
+    is_stale: bool
+
+
+def load_plans_metadata(
+    path: Path | str | None = None,
+    *,
+    now: datetime | None = None,
+    warn_days: int = PLANS_FRESHNESS_WARN_DAYS,
+) -> PlansMetadata:
+    """Return header-only metadata for a plans file without full validation.
+
+    ``warn_days`` is surfaced as :attr:`PlansMetadata.is_stale` so the
+    CLI can render a single yellow banner without re-implementing the
+    threshold. Malformed dates are reported as ``PlansFileError`` — a
+    missing or non-parseable ``updated`` field is the kind of drift we
+    want a user to see immediately, not swallow.
+    """
+
+    resolved = Path(path) if path is not None else bundled_plans_path()
+
+    try:
+        raw_text = resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PlansFileError(
+            f"Could not read plans file at {resolved}: {exc}"
+        ) from exc
+
+    try:
+        parsed: Any = yaml.safe_load(raw_text)
+    except yaml.YAMLError as exc:
+        raise PlansFileError(
+            f"Invalid YAML in plans file {resolved}: {exc}"
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise PlansFileError(
+            f"Plans file {resolved} must contain a YAML mapping at the top level."
+        )
+
+    version = parsed.get("version")
+    if not isinstance(version, int):
+        raise PlansFileError(
+            f"Plans file {resolved} is missing an integer 'version' field."
+        )
+
+    raw_updated: Any = parsed.get("updated")
+    if raw_updated is None:
+        raise PlansFileError(
+            f"Plans file {resolved} is missing an 'updated' field."
+        )
+    if isinstance(raw_updated, date) and not isinstance(raw_updated, datetime):
+        updated_date = raw_updated
+    elif isinstance(raw_updated, datetime):
+        updated_date = raw_updated.date()
+    elif isinstance(raw_updated, str):
+        try:
+            updated_date = date.fromisoformat(raw_updated)
+        except ValueError as exc:
+            raise PlansFileError(
+                f"Plans file {resolved} has an unparseable 'updated' value: {raw_updated!r}"
+            ) from exc
+    else:
+        raise PlansFileError(
+            f"Plans file {resolved} has an unsupported 'updated' type: {type(raw_updated).__name__}"
+        )
+
+    plans_raw = parsed.get("plans")
+    plan_count = len(plans_raw) if isinstance(plans_raw, list) else 0
+
+    reference = (now or datetime.now(tz=UTC)).date()
+    age_days = max((reference - updated_date).days, 0)
+
+    return PlansMetadata(
+        version=version,
+        updated=updated_date,
+        path=resolved,
+        plan_count=plan_count,
+        age_days=age_days,
+        is_stale=age_days > warn_days,
+    )
 
 
 def bundled_plans_path() -> Path:

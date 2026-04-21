@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,7 +45,14 @@ from tokie_cli.config import (
     save_config,
 )
 from tokie_cli.db import connect, insert_events, migrate, query_events
-from tokie_cli.plans import PlanTemplate, Trackability, load_plans
+from tokie_cli.plans import (
+    PlansFileError,
+    PlanTemplate,
+    Trackability,
+    load_plans,
+    load_plans_metadata,
+)
+from tokie_cli.schema import UsageEvent
 
 app = typer.Typer(
     name="tokie",
@@ -252,8 +260,28 @@ def doctor(
                 }
             )
 
+    plans_meta: dict[str, Any] | None = None
+    plans_error: str | None = None
+    try:
+        meta = load_plans_metadata()
+        plans_meta = {
+            "path": str(meta.path),
+            "version": meta.version,
+            "updated": meta.updated.isoformat(),
+            "plan_count": meta.plan_count,
+            "age_days": meta.age_days,
+            "is_stale": meta.is_stale,
+        }
+    except PlansFileError as exc:
+        plans_error = str(exc)
+
     if as_json:
-        console.print_json(data={"collectors": rows})
+        payload: dict[str, Any] = {"collectors": rows}
+        if plans_meta is not None:
+            payload["plans"] = plans_meta
+        if plans_error is not None:
+            payload["plans_error"] = plans_error
+        console.print_json(data=payload)
         return
 
     table = Table(title="Tokie doctor", show_header=True, header_style="bold")
@@ -273,13 +301,55 @@ def doctor(
         )
     console.print(table)
 
+    if plans_error is not None:
+        err_console.print(f"[red]plans.yaml: {plans_error}[/red]")
+    elif plans_meta is not None:
+        if plans_meta["is_stale"]:
+            err_console.print(
+                "[yellow]plans.yaml is {age} days old (updated {updated}); "
+                "vendor limits drift — run `pip install -U tokie-cli` or file a "
+                "PR against plans.yaml.[/yellow]".format(
+                    age=plans_meta["age_days"], updated=plans_meta["updated"]
+                )
+            )
+        else:
+            console.print(
+                f"[dim]plans.yaml: v{plans_meta['version']} · {plans_meta['plan_count']} plans "
+                f"· updated {plans_meta['updated']} ({plans_meta['age_days']}d ago)[/dim]"
+            )
+
+
+async def _collect_batch(
+    collector: Collector, since: datetime | None
+) -> tuple[Collector, list[UsageEvent], float, str | None]:
+    """Drain one collector's ``scan()`` iterator into a list.
+
+    Returns a 4-tuple ``(collector, events, elapsed_seconds, error)``.
+    Errors are captured instead of raised so one broken collector cannot
+    abort an otherwise-successful ``tokie scan`` — the CLI prints the
+    failure inline and keeps going. Duration is measured at the gather
+    layer so a slow collector shows up in the per-line output.
+    """
+
+    start = time.monotonic()
+    try:
+        events: list[UsageEvent] = []
+        async for event in collector.scan(since=since):
+            events.append(event)
+    except Exception as exc:  # pragma: no cover - defensive
+        return collector, [], time.monotonic() - start, f"{type(exc).__name__}: {exc}"
+    return collector, events, time.monotonic() - start, None
+
 
 async def _run_scan(collectors: Iterable[Collector], since: datetime | None) -> int:
-    """Run each collector once and bulk-insert every emitted event.
+    """Run every collector in parallel and bulk-insert the merged stream.
 
-    Returns the total number of new events committed to the DB across all
-    collectors. Duplicate ``raw_hash`` values are silently ignored by the
-    insert path, which is the whole point of the idempotency contract.
+    Returns the total number of new events committed to the DB. Each
+    collector's ``scan()`` is drained concurrently — most collectors
+    spend their time on file or network I/O, so ``asyncio.gather``
+    typically cuts wall-clock scan time proportionally to the collector
+    count. Duplicate ``raw_hash`` values are silently ignored by the
+    insert path (idempotency contract).
     """
 
     cfg = load_config()
@@ -287,20 +357,29 @@ async def _run_scan(collectors: Iterable[Collector], since: datetime | None) -> 
     conn = connect(cfg.db_path)
     try:
         migrate(conn)
+        collector_list = list(collectors)
+        tasks = [_collect_batch(c, since) for c in collector_list]
+        results = await asyncio.gather(*tasks)
+
         total_new = 0
-        for collector in collectors:
-            batch = []
-            async for event in collector.scan(since=since):
-                batch.append(event)
+        for collector, batch, elapsed, error in results:
+            if error is not None:
+                err_console.print(
+                    f"[red]{collector.name}[/red]: failed after {elapsed:.2f}s — {error}"
+                )
+                continue
             if batch:
                 stats = insert_events(conn, batch)
                 total_new += stats.inserted
                 seen = stats.inserted + stats.deduped
                 console.print(
-                    f"[green]{collector.name}[/green]: {stats.inserted} new / {seen} seen"
+                    f"[green]{collector.name}[/green]: "
+                    f"{stats.inserted} new / {seen} seen ({elapsed:.2f}s)"
                 )
             else:
-                console.print(f"[dim]{collector.name}: no events[/dim]")
+                console.print(
+                    f"[dim]{collector.name}: no events ({elapsed:.2f}s)[/dim]"
+                )
         return total_new
     finally:
         conn.close()
@@ -345,8 +424,15 @@ def scan(
         if cutoff is None:
             raise typer.BadParameter(f"invalid ISO timestamp {since!r}", param_hint="--since")
 
+    scan_start = time.monotonic()
     total = asyncio.run(_run_scan(instances, cutoff))
-    console.print(f"[bold]total new events: {total}[/bold]")
+    elapsed = time.monotonic() - scan_start
+    count = len(instances)
+    noun = "collector" if count == 1 else "collectors"
+    console.print(
+        f"[bold]total new events: {total}[/bold] "
+        f"[dim]({count} {noun} in {elapsed:.2f}s)[/dim]"
+    )
 
 
 @app.command()
