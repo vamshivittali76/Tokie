@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-20
+
+Week 3 of the build-in-public run: close the feedback loop with a real
+alerting system. Tokie can now watch subscriptions against configurable
+thresholds, dedupe fires per window, and deliver alerts through banner,
+desktop, and webhook channels. Everything stays opt-in — the default
+install still sends zero network traffic.
+
+### Added
+- **Threshold engine** (`src/tokie_cli/alerts/thresholds.py`): pure, I/O-free
+  evaluation of `SubscriptionView`s against `ThresholdRule`s. Default levels
+  are 75 / 95 / 100 and rules can target `plan_id` / `account_id`. Every
+  crossing carries a stable dedupe key of
+  `(plan_id, account_id, window_type, window_starts_at, threshold_pct)` so
+  the same 95% hit never re-fires within the same reset window.
+- **Fire storage** (`src/tokie_cli/alerts/storage.py`): new `threshold_fires`
+  table in `tokie.db` (idempotent schema creation, indexed on `fired_at`).
+  Powers dedupe across CLI invocations and dashboard renders.
+- **Delivery channels** (`src/tokie_cli/alerts/channels.py`): `Channel`
+  protocol with `BannerChannel` (always-on, renders color-coded lines into
+  the `tokie status` header and the dashboard), `DesktopChannel`
+  (`desktop-notifier`, opt-in via `alerts_desktop_enabled = true`), and
+  `WebhookChannel` with Slack, Discord, and raw-JSON formats. Webhook URLs
+  live in the OS keyring under `tokie-webhook/<name>`; the TOML only stores
+  the name so configs stay paste-safe.
+- **Alert engine** (`src/tokie_cli/alerts/engine.py`): ties config ->
+  aggregator -> threshold evaluation -> storage -> channel dispatch into a
+  single `check_alerts(...)` call. Returns a structured `AlertRunResult`
+  with fired crossings, dispatch results, and the rendered banner.
+- **CLI surface**: new `tokie alerts` subtree.
+  - `tokie alerts check` — one-shot evaluation, prints banner + per-channel
+    dispatch status.
+  - `tokie alerts watch` — continuous loop (interval + `--once` escape hatch
+    for tests).
+  - `tokie alerts reset` — clears the `threshold_fires` table so every armed
+    threshold can fire again.
+  - `tokie alerts banner` — pure read: renders the current banner without
+    triggering dispatch.
+  - `tokie status` now prepends the armed banner when any threshold is
+    currently crossed.
+- **Dashboard threshold editor** (`src/tokie_cli/dashboard/templates/index.html`,
+  `src/tokie_cli/dashboard/server.py`):
+  - Armed banner rendered above the subscription grid.
+  - New endpoints: `GET /api/alerts`, `GET /api/thresholds`, `POST
+    /api/thresholds`.
+  - Alpine-powered rule editor with add/remove rows, per-rule `plan_id`,
+    `account_id`, `levels` (CSV), and `channels` (CSV). Save round-trips
+    back to `tokie.toml` with the existing atomic-write path.
+- **Config schema** (`src/tokie_cli/config.py`): `ThresholdRuleConfig` and
+  `WebhookConfigEntry` dataclasses; `TokieConfig` gains `thresholds`,
+  `webhooks`, and `alerts_desktop_enabled`. Round-trip parsing and saving
+  preserve existing comments and other sections.
+- New tests: `tests/test_alerts_thresholds.py`,
+  `tests/test_alerts_storage.py`, `tests/test_alerts_channels.py`,
+  `tests/test_alerts_engine.py`, plus extensions to the dashboard and CLI
+  suites. 311 tests passing, `mypy --strict` clean, `ruff` clean.
+
+### Changed
+- `pyproject.toml` picks up `desktop-notifier` as an optional-but-declared
+  dependency; the import is guarded so headless installs still work.
+- `tokie status` is now threshold-aware but remains a pure read when no
+  thresholds are configured (behaviour from v0.2.0 is preserved).
+
+### Notes
+- The alert pipeline never raises through `check_alerts`: a broken Slack
+  webhook will never silently break the desktop notification for the same
+  crossing. Per-channel failures surface as `ChannelDispatchResult` rows.
+- Default config still has zero thresholds and zero webhooks, so v0.2.0
+  behaviour is preserved byte-for-byte until the operator opts in.
+
 ## [0.2.0] — 2026-04-20
 
 Week 2 of the build-in-public run: expand collector coverage, ship a live

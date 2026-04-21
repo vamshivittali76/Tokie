@@ -217,3 +217,121 @@ def test_run_accepts_localhost_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     run(host="localhost", port=9999)
     assert called["host"] == "localhost"
     assert called["port"] == 9999
+
+
+# ---------------------------------------------------------------------------
+# Alerts + thresholds API
+# ---------------------------------------------------------------------------
+
+
+def test_alerts_endpoint_reports_armed(tmp_path: Path) -> None:
+    # Enough events to cross 75% of a 45-message rolling-5h window (34+ msgs).
+    events = [
+        _event(when=NOW - timedelta(minutes=i * 2), tokens=100) for i in range(40)
+    ]
+    client = _make_client(events=events, tmp_path=tmp_path)
+    # Configure a threshold rule via POST, then query /api/alerts.
+    resp = client.post(
+        "/api/thresholds",
+        json={
+            "thresholds": [
+                {
+                    "plan_id": None,
+                    "account_id": None,
+                    "levels": [50, 75],
+                    "channels": ["banner"],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+
+    res = client.get("/api/alerts")
+    assert res.status_code == 200
+    payload = res.json()
+    armed = payload["armed"]
+    assert armed, payload
+    assert any(a["threshold_pct"] == 75 for a in armed)
+    assert payload["banner"]
+
+
+def test_thresholds_get_returns_empty_list_by_default(tmp_path: Path) -> None:
+    client = _make_client(tmp_path=tmp_path)
+    res = client.get("/api/thresholds")
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["thresholds"] == []
+    assert "banner" in payload["available_channels"]
+
+
+def test_thresholds_post_persists_to_tokie_toml(tmp_path: Path) -> None:
+    # Redirect config_dir via TOKIE_CONFIG_HOME so save_config writes to tmp.
+    import os
+
+    os.environ["TOKIE_CONFIG_HOME"] = str(tmp_path / "cfg")
+    try:
+        client = _make_client(tmp_path=tmp_path)
+        resp = client.post(
+            "/api/thresholds",
+            json={
+                "thresholds": [
+                    {
+                        "plan_id": "claude_pro_personal",
+                        "account_id": "default",
+                        "levels": [50, 80, 100],
+                        "channels": ["banner", "desktop"],
+                    }
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["thresholds"][0]["levels"] == [50, 80, 100]
+
+        cfg_path = tmp_path / "cfg" / "tokie.toml"
+        assert cfg_path.exists()
+        text = cfg_path.read_text(encoding="utf-8")
+        assert "thresholds" in text
+        assert "80" in text
+
+        # A fresh GET returns the saved rules.
+        check = client.get("/api/thresholds").json()
+        assert check["thresholds"][0]["levels"] == [50, 80, 100]
+    finally:
+        os.environ.pop("TOKIE_CONFIG_HOME", None)
+
+
+def test_thresholds_post_rejects_bad_input(tmp_path: Path) -> None:
+    client = _make_client(tmp_path=tmp_path)
+    resp = client.post("/api/thresholds", json={"thresholds": "nope"})
+    assert resp.status_code == 400
+    resp2 = client.post(
+        "/api/thresholds",
+        json={
+            "thresholds": [
+                {"levels": "nope", "channels": ["banner"]}
+            ]
+        },
+    )
+    assert resp2.status_code == 400
+
+
+def test_thresholds_post_refuses_non_loopback(tmp_path: Path) -> None:
+    config = TokieConfig(
+        db_path=tmp_path / "tokie.db",
+        audit_log_path=tmp_path / "audit.log",
+        dashboard_host="0.0.0.0",
+        subscriptions=(
+            SubscriptionBinding(plan_id="claude_pro_personal", account_id="default"),
+        ),
+    )
+    state = AppState(
+        config=config,
+        plans_loader=lambda: [_claude_plan()],
+        events_loader=lambda _cfg: [],
+        now=lambda: NOW,
+    )
+    app = create_app(state=state)
+    client = TestClient(app)
+    resp = client.post("/api/thresholds", json={"thresholds": []})
+    assert resp.status_code == 403

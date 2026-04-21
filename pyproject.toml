@@ -1,6 +1,6 @@
 [project]
 name = "tokie-cli"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first CLI and dashboard that tracks token usage and subscription quotas across every AI tool you pay for."
 readme = "README.md"
 requires-python = ">=3.11"

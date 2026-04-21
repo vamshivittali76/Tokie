@@ -31,13 +31,19 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from tokie_cli import __version__
-from tokie_cli.config import TokieConfig, load_config
+from tokie_cli.config import (
+    ThresholdRuleConfig,
+    TokieConfig,
+    default_config_path,
+    load_config,
+    save_config,
+)
 from tokie_cli.dashboard.aggregator import DashboardPayload, build_payload
 from tokie_cli.db import connect, migrate, query_events
 from tokie_cli.plans import PlanTemplate, load_plans
@@ -181,6 +187,165 @@ def create_app(
         payload = _build(state)
         return {"accounts": list(payload.accounts)}
 
+    @app.get("/api/alerts", response_class=JSONResponse)
+    def alerts_status(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        """Live evaluation of threshold rules (no dispatch, no DB write).
+
+        Uses the same ``events_loader`` injection path as :func:`_build`, so
+        the dashboard's test harness can drive alerts without touching a real
+        SQLite file.
+        """
+
+        from tokie_cli.alerts.channels import render_banner
+        from tokie_cli.alerts.thresholds import (
+            ThresholdRule,
+            evaluate_thresholds,
+        )
+
+        payload = _build(state)
+        rules = [
+            ThresholdRule(
+                plan_id=r.plan_id,
+                account_id=r.account_id,
+                levels=tuple(r.levels),
+                channels=tuple(r.channels),
+            )
+            for r in state.config.thresholds
+        ]
+        armed = evaluate_thresholds(payload.subscriptions, rules)
+        banner = render_banner(armed)
+        return {
+            "ran_at": state.now().isoformat(),
+            "armed": [
+                {
+                    "plan_id": c.plan_id,
+                    "account_id": c.account_id,
+                    "display_name": c.display_name,
+                    "window_type": c.window_type,
+                    "window_starts_at": c.window_starts_at_iso,
+                    "window_resets_at": c.window_resets_at_iso,
+                    "threshold_pct": c.threshold_pct,
+                    "pct_used": c.pct_used,
+                    "used": c.used,
+                    "limit": c.limit,
+                    "remaining": c.remaining,
+                    "severity": c.severity(),
+                    "channels": list(c.channels),
+                }
+                for c in armed
+            ],
+            "banner": [
+                {"text": line.text, "severity": line.severity} for line in banner
+            ],
+        }
+
+    @app.get("/api/thresholds", response_class=JSONResponse)
+    def get_thresholds(state: AppState = Depends(get_state)) -> dict[str, Any]:
+        """Return the currently-configured threshold rules."""
+
+        return {
+            "thresholds": [
+                {
+                    "plan_id": rule.plan_id,
+                    "account_id": rule.account_id,
+                    "levels": list(rule.levels),
+                    "channels": list(rule.channels),
+                }
+                for rule in state.config.thresholds
+            ],
+            "available_channels": _enumerate_channels(state.config),
+        }
+
+    @app.post("/api/thresholds", response_class=JSONResponse)
+    def post_thresholds(
+        payload: dict[str, Any] = Body(...),
+        state: AppState = Depends(get_state),
+    ) -> dict[str, Any]:
+        """Replace the threshold rule list and persist to ``tokie.toml``.
+
+        Refused when the dashboard is bound non-loopback; editing config over
+        the network is a foot-gun the CLI's ``--remote`` flag doesn't cover.
+        """
+
+        host = state.config.dashboard_host
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            raise HTTPException(
+                status_code=403,
+                detail="threshold edits are loopback-only",
+            )
+
+        rules_raw = payload.get("thresholds")
+        if not isinstance(rules_raw, list):
+            raise HTTPException(status_code=400, detail="'thresholds' must be a list")
+
+        parsed: list[ThresholdRuleConfig] = []
+        for i, entry in enumerate(rules_raw):
+            if not isinstance(entry, dict):
+                raise HTTPException(
+                    status_code=400, detail=f"thresholds[{i}] must be an object"
+                )
+            plan_id = entry.get("plan_id") or None
+            account_id = entry.get("account_id") or None
+            levels_raw = entry.get("levels", [75, 95, 100])
+            channels_raw = entry.get("channels", ["banner"])
+            if not isinstance(levels_raw, list) or not all(
+                isinstance(x, int) and not isinstance(x, bool) for x in levels_raw
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"thresholds[{i}].levels must be a list of integers",
+                )
+            if not isinstance(channels_raw, list) or not all(
+                isinstance(x, str) for x in channels_raw
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"thresholds[{i}].channels must be a list of strings",
+                )
+            parsed.append(
+                ThresholdRuleConfig(
+                    plan_id=plan_id if plan_id else None,
+                    account_id=account_id if account_id else None,
+                    levels=tuple(int(v) for v in levels_raw),
+                    channels=tuple(str(v) for v in channels_raw),
+                )
+            )
+
+        # The dashboard is a single-process app; we mutate the live state's
+        # config in-place (frozen dataclass → rebuild via constructor) so the
+        # very next request sees the new rules without needing a reload.
+        new_config = TokieConfig(
+            db_path=state.config.db_path,
+            audit_log_path=state.config.audit_log_path,
+            dashboard_host=state.config.dashboard_host,
+            dashboard_port=state.config.dashboard_port,
+            collectors=state.config.collectors,
+            subscriptions=state.config.subscriptions,
+            thresholds=tuple(parsed),
+            webhooks=state.config.webhooks,
+            alerts_desktop_enabled=state.config.alerts_desktop_enabled,
+        )
+        save_config(new_config, default_config_path())
+        new_state = AppState(
+            config=new_config,
+            plans_loader=state.plans_loader,
+            events_loader=state.events_loader,
+            now=state.now,
+        )
+        request_app: FastAPI = app
+        request_app.state.tokie = new_state
+        return {
+            "thresholds": [
+                {
+                    "plan_id": r.plan_id,
+                    "account_id": r.account_id,
+                    "levels": list(r.levels),
+                    "channels": list(r.channels),
+                }
+                for r in new_config.thresholds
+            ]
+        }
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, state: AppState = Depends(get_state)) -> HTMLResponse:
         """Single-page dashboard. Client JS fetches /api/status on mount."""
@@ -214,6 +379,17 @@ def _build(state: AppState) -> DashboardPayload:
         events,
         now=state.now(),
     )
+
+
+def _enumerate_channels(config: TokieConfig) -> list[str]:
+    """Return a UI-friendly list of channel names the operator can opt-in to."""
+
+    out: list[str] = ["banner"]
+    if config.alerts_desktop_enabled:
+        out.append("desktop")
+    for webhook in config.webhooks:
+        out.append(f"webhook:{webhook.name}")
+    return out
 
 
 def _to_jsonable(value: Any) -> Any:

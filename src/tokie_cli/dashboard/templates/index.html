@@ -108,6 +108,128 @@
         </section>
       </template>
 
+      <!-- ============================ ALERT BANNER ============================ -->
+      <section x-show="alerts.banner?.length" class="fade-in">
+        <div class="rounded-xl border border-amber-700 bg-amber-900/30 p-4 space-y-1">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-amber-200">Thresholds armed</h2>
+            <button
+              @click="showThresholdEditor = !showThresholdEditor"
+              class="text-xs underline underline-offset-2 text-amber-100 hover:text-white"
+            >
+              <span x-show="!showThresholdEditor">edit rules</span>
+              <span x-show="showThresholdEditor">hide editor</span>
+            </button>
+          </div>
+          <template x-for="line in alerts.banner" :key="line.text">
+            <p class="text-xs text-amber-100" :class="alertSeverityClass(line.severity)" x-text="line.text"></p>
+          </template>
+        </div>
+      </section>
+
+      <!-- ============================ THRESHOLD EDITOR ============================ -->
+      <section x-show="showThresholdEditor" class="fade-in space-y-3">
+        <div class="panel rounded-xl border border-slate-800 bg-slate-900/60 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-lg font-semibold">Threshold rules</h2>
+            <div class="flex gap-2">
+              <button
+                @click="addThreshold()"
+                class="px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700"
+                :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100' : ''"
+              >
+                + add rule
+              </button>
+              <button
+                @click="saveThresholds()"
+                class="px-3 py-1.5 text-xs font-medium rounded-md bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white"
+                :disabled="savingThresholds"
+              >
+                <span x-show="!savingThresholds">save</span>
+                <span x-show="savingThresholds">saving…</span>
+              </button>
+            </div>
+          </div>
+
+          <p x-show="thresholdError" class="text-xs text-red-400 mb-2" x-text="thresholdError"></p>
+          <p x-show="thresholdSaved" class="text-xs text-emerald-400 mb-2">saved to tokie.toml</p>
+
+          <template x-if="!thresholds.length">
+            <p class="text-xs text-slate-400">
+              No rules yet — a rule with no <code>plan_id</code>/<code>account_id</code> applies everywhere.
+            </p>
+          </template>
+
+          <table class="w-full text-xs" x-show="thresholds.length">
+            <thead class="text-slate-400 uppercase tracking-wider">
+              <tr>
+                <th class="text-left py-1 pr-3">plan_id (blank = all)</th>
+                <th class="text-left py-1 pr-3">account_id (blank = all)</th>
+                <th class="text-left py-1 pr-3">levels (csv)</th>
+                <th class="text-left py-1 pr-3">channels (csv)</th>
+                <th class="text-right py-1"></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+              <template x-for="(rule, idx) in thresholds" :key="idx">
+                <tr>
+                  <td class="py-1 pr-3">
+                    <input
+                      type="text"
+                      x-model="rule.plan_id"
+                      placeholder="claude_pro"
+                      class="w-full px-2 py-1 rounded-md bg-slate-800 text-slate-100 border border-slate-700"
+                      :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300' : ''"
+                    />
+                  </td>
+                  <td class="py-1 pr-3">
+                    <input
+                      type="text"
+                      x-model="rule.account_id"
+                      placeholder="default"
+                      class="w-full px-2 py-1 rounded-md bg-slate-800 text-slate-100 border border-slate-700"
+                      :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300' : ''"
+                    />
+                  </td>
+                  <td class="py-1 pr-3">
+                    <input
+                      type="text"
+                      x-model="rule.levels_csv"
+                      placeholder="75,95,100"
+                      class="w-full px-2 py-1 rounded-md bg-slate-800 text-slate-100 border border-slate-700"
+                      :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300' : ''"
+                    />
+                  </td>
+                  <td class="py-1 pr-3">
+                    <input
+                      type="text"
+                      x-model="rule.channels_csv"
+                      placeholder="banner,desktop"
+                      class="w-full px-2 py-1 rounded-md bg-slate-800 text-slate-100 border border-slate-700"
+                      :class="theme === 'light' ? 'bg-white text-slate-800 border-slate-300' : ''"
+                    />
+                  </td>
+                  <td class="py-1 text-right">
+                    <button
+                      @click="removeThreshold(idx)"
+                      class="text-xs text-red-400 hover:text-red-300"
+                      title="remove this rule"
+                    >
+                      remove
+                    </button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+
+          <p class="text-[11px] text-slate-500 mt-3">
+            Available channels: <span x-text="(alerts.available_channels || ['banner']).join(', ')"></span>.
+            Webhook secrets live in your OS keyring; TOML only holds the name.
+          </p>
+        </div>
+      </section>
+
       <!-- ============================ BURN RATE ============================ -->
       <section x-show="hasAnyData && payload.burn_rate?.length" class="fade-in">
         <div class="grid sm:grid-cols-3 gap-3">
@@ -313,6 +435,12 @@
         timelineChart: null,
         theme: 'dark',
         accountFilter: 'all',
+        alerts: { banner: [], armed: [], available_channels: ['banner'] },
+        thresholds: [],
+        showThresholdEditor: false,
+        savingThresholds: false,
+        thresholdError: '',
+        thresholdSaved: false,
         get hasAnyData() {
           return (this.payload?.event_count || 0) > 0;
         },
@@ -328,12 +456,17 @@
           } catch (_e) { /* privacy mode */ }
           this.renderChart();
           this.renderTimeline();
+          this.refreshAlerts();
+          this.refreshThresholds();
           setInterval(() => {
             this.lastUpdated = this.humanize(new Date(this.payload.generated_at));
           }, 30000);
           setInterval(() => {
             if (this.autoRefresh) this.refresh();
           }, 10000);
+          setInterval(() => {
+            if (this.autoRefresh) this.refreshAlerts();
+          }, 15000);
         },
         toggleTheme() {
           this.theme = this.theme === 'dark' ? 'light' : 'dark';
@@ -482,6 +615,99 @@
           if (pct >= 0.95) return 'text-red-400';
           if (pct >= 0.75) return 'text-amber-400';
           return 'text-emerald-400';
+        },
+        alertSeverityClass(sev) {
+          return {
+            low: 'text-emerald-300',
+            medium: 'text-amber-200',
+            high: 'text-orange-200',
+            over: 'text-red-200 font-semibold',
+          }[sev] || 'text-amber-100';
+        },
+        async refreshAlerts() {
+          try {
+            const [armed, thresholds] = await Promise.all([
+              fetch('/api/alerts').then(r => r.ok ? r.json() : null),
+              fetch('/api/thresholds').then(r => r.ok ? r.json() : null),
+            ]);
+            if (armed) {
+              this.alerts = {
+                banner: armed.banner || [],
+                armed: armed.armed || [],
+                available_channels: thresholds?.available_channels || ['banner'],
+              };
+            }
+          } catch (_e) { /* transient */ }
+        },
+        async refreshThresholds() {
+          try {
+            const res = await fetch('/api/thresholds');
+            if (!res.ok) return;
+            const body = await res.json();
+            this.thresholds = (body.thresholds || []).map(rule => ({
+              plan_id: rule.plan_id || '',
+              account_id: rule.account_id || '',
+              levels_csv: (rule.levels || []).join(','),
+              channels_csv: (rule.channels || ['banner']).join(','),
+            }));
+            this.alerts.available_channels = body.available_channels || ['banner'];
+          } catch (_e) { /* transient */ }
+        },
+        addThreshold() {
+          this.thresholds.push({
+            plan_id: '',
+            account_id: '',
+            levels_csv: '75,95,100',
+            channels_csv: 'banner',
+          });
+        },
+        removeThreshold(idx) {
+          this.thresholds.splice(idx, 1);
+        },
+        async saveThresholds() {
+          this.thresholdError = '';
+          this.thresholdSaved = false;
+          const payload = { thresholds: [] };
+          for (const rule of this.thresholds) {
+            const levels = (rule.levels_csv || '')
+              .split(',')
+              .map(s => parseInt(s.trim(), 10))
+              .filter(n => Number.isFinite(n));
+            if (!levels.length) {
+              this.thresholdError = 'every rule needs at least one numeric level';
+              return;
+            }
+            const channels = (rule.channels_csv || '')
+              .split(',')
+              .map(s => s.trim())
+              .filter(Boolean);
+            payload.thresholds.push({
+              plan_id: rule.plan_id || null,
+              account_id: rule.account_id || null,
+              levels,
+              channels: channels.length ? channels : ['banner'],
+            });
+          }
+          this.savingThresholds = true;
+          try {
+            const res = await fetch('/api/thresholds', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({}));
+              this.thresholdError = body.detail || `http ${res.status}`;
+            } else {
+              this.thresholdSaved = true;
+              setTimeout(() => { this.thresholdSaved = false; }, 3000);
+              await this.refreshAlerts();
+            }
+          } catch (e) {
+            this.thresholdError = 'network error';
+          } finally {
+            this.savingThresholds = false;
+          }
         },
       };
     }

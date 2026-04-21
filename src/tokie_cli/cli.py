@@ -27,6 +27,7 @@ from rich.console import Console
 from rich.table import Table
 
 from tokie_cli import __version__
+from tokie_cli.alerts import AlertRunResult, check_alerts
 from tokie_cli.collectors import Collector
 from tokie_cli.collectors.api_anthropic import AnthropicAPICollector
 from tokie_cli.collectors.api_gemini import GeminiAPICollector
@@ -393,6 +394,17 @@ def status(
         console.print("[dim]no events yet; run 'tokie scan'[/dim]")
         return
 
+    try:
+        alert_result = check_alerts(cfg, dry_run=True)
+    except Exception:  # pragma: no cover - alerts must never break status
+        alert_result = None
+    if alert_result and alert_result.banner_lines:
+        console.print()
+        console.print("[bold yellow]⚠ thresholds armed[/bold yellow]")
+        for line in alert_result.banner_lines:
+            console.print(f"  [{_severity_style(line.severity)}]{line.text}[/]")
+        console.print()
+
     table = Table(title="Tokie status", show_header=True, header_style="bold")
     table.add_column("provider")
     table.add_column("product")
@@ -569,6 +581,252 @@ def watch() -> None:
     from tokie_cli.tui import run_watch
 
     run_watch(config=cfg)
+
+
+alerts_app = typer.Typer(
+    name="alerts",
+    help="Threshold alerts — evaluate subscriptions and dispatch notifications.",
+    no_args_is_help=True,
+)
+app.add_typer(alerts_app)
+
+
+def _severity_style(severity: str) -> str:
+    return {
+        "low": "green",
+        "medium": "yellow",
+        "high": "orange3",
+        "over": "bold red",
+    }.get(severity, "white")
+
+
+def _render_alert_result(result: AlertRunResult) -> None:
+    """Print banner + fired-summary for a run of ``tokie alerts check``."""
+
+    if not result.armed:
+        console.print("[dim]no thresholds armed.[/dim]")
+        return
+    console.print("[bold]armed thresholds[/bold]")
+    for line in result.banner_lines:
+        console.print(f"  [{_severity_style(line.severity)}]{line.text}[/]")
+    if result.fired:
+        console.print(f"[bold green]dispatched {len(result.fired)} new fire(s):[/]")
+        for crossing in result.fired:
+            console.print(
+                f"  - {crossing.display_name} [{crossing.account_id}] "
+                f"@ {crossing.threshold_pct}% via {', '.join(crossing.channels)}"
+            )
+    else:
+        console.print("[dim]no new fires — everything already dispatched this window.[/dim]")
+
+    if result.dispatch_results:
+        ok = sum(1 for r in result.dispatch_results if r.ok)
+        fail = len(result.dispatch_results) - ok
+        console.print(
+            f"[dim]dispatches: {ok} ok, {fail} failed[/dim]"
+        )
+        for r in result.dispatch_results:
+            if r.ok:
+                continue
+            err_console.print(
+                f"[yellow]channel {r.channel} failed: {r.message}[/yellow]"
+            )
+
+
+@alerts_app.command("check")
+def alerts_check(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Evaluate + record new fires but skip every channel side effect.",
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit machine-readable JSON."
+    ),
+) -> None:
+    """Run one alert tick: evaluate thresholds and fire new crossings."""
+
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        err_console.print(
+            "[yellow]no database yet; run 'tokie init' and 'tokie scan' first[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    result = check_alerts(cfg, dry_run=dry_run)
+
+    if as_json:
+        console.print_json(
+            data={
+                "ran_at": result.ran_at.isoformat(),
+                "armed": [
+                    {
+                        "plan_id": c.plan_id,
+                        "account_id": c.account_id,
+                        "window_type": c.window_type,
+                        "window_starts_at": c.window_starts_at_iso,
+                        "window_resets_at": c.window_resets_at_iso,
+                        "threshold_pct": c.threshold_pct,
+                        "pct_used": c.pct_used,
+                        "severity": c.severity(),
+                    }
+                    for c in result.armed
+                ],
+                "fired": [
+                    {
+                        "plan_id": c.plan_id,
+                        "account_id": c.account_id,
+                        "threshold_pct": c.threshold_pct,
+                        "channels": list(c.channels),
+                    }
+                    for c in result.fired
+                ],
+                "dispatch_results": [
+                    {
+                        "channel": r.channel,
+                        "ok": r.ok,
+                        "message": r.message,
+                    }
+                    for r in result.dispatch_results
+                ],
+                "banner": [
+                    {"text": line.text, "severity": line.severity}
+                    for line in result.banner_lines
+                ],
+                "dry_run": dry_run,
+            }
+        )
+        return
+
+    if dry_run:
+        console.print("[dim]--dry-run: no channel side effects will be triggered[/dim]")
+    _render_alert_result(result)
+
+
+@alerts_app.command("watch")
+def alerts_watch(
+    interval: int = typer.Option(
+        60, "--interval", "-i", min=5, help="Seconds between ticks."
+    ),
+    iterations: int = typer.Option(
+        0,
+        "--iterations",
+        "-n",
+        help="Stop after N ticks (0 = loop forever, Ctrl-C to quit).",
+    ),
+) -> None:
+    """Run ``tokie alerts check`` in a loop until Ctrl-C.
+
+    Useful as a one-liner on a tmux pane or a tiny systemd service; for
+    heavier use, wrap in ``cron``/``launchd`` calling ``tokie alerts check``.
+    """
+
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        err_console.print(
+            "[yellow]no database yet; run 'tokie init' and 'tokie scan' first[/yellow]"
+        )
+        raise typer.Exit(code=1)
+    import time
+
+    count = 0
+    try:
+        while True:
+            result = check_alerts(cfg)
+            ts = result.ran_at.strftime("%H:%M:%S")
+            if result.fired:
+                console.print(
+                    f"[green]{ts}[/green] fired {len(result.fired)} new, "
+                    f"{len(result.armed)} armed total"
+                )
+                for crossing in result.fired:
+                    console.print(
+                        f"  -> {crossing.display_name} [{crossing.account_id}] "
+                        f"@ {crossing.threshold_pct}%"
+                    )
+            else:
+                console.print(
+                    f"[dim]{ts} ok ({len(result.armed)} armed, 0 new)[/dim]"
+                )
+            count += 1
+            if iterations and count >= iterations:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        console.print("[dim]alerts watcher stopped[/dim]")
+
+
+@alerts_app.command("reset")
+def alerts_reset(
+    confirm: bool = typer.Option(
+        False,
+        "--yes",
+        help="Skip interactive confirmation — for scripts / rearming after testing.",
+    ),
+) -> None:
+    """Delete every recorded fire so every armed threshold fires again.
+
+    The fire log lives in the same SQLite DB as usage events but in a
+    separate table, so this never affects historical usage. Use when you
+    want to rearm channels after changing rules or after a dry-run.
+    """
+
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        console.print("[dim]nothing to reset — no database yet.[/dim]")
+        raise typer.Exit(code=0)
+    if not confirm:
+        err_console.print(
+            "[yellow]pass --yes to confirm wiping the threshold fire log[/yellow]"
+        )
+        raise typer.Exit(code=2)
+
+    from tokie_cli.alerts import AlertStorage, connect_alerts
+
+    conn = connect_alerts(cfg.db_path)
+    try:
+        storage = AlertStorage(conn)
+        removed = storage.clear()
+    finally:
+        conn.close()
+    console.print(f"[green]cleared {removed} fire record(s)[/green]")
+
+
+@alerts_app.command("banner")
+def alerts_banner(
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Render the current alert banner (live, no dispatch, no DB write)."""
+
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        if as_json:
+            console.print_json(data={"banner": []})
+        else:
+            console.print("[dim]no database yet — no banner.[/dim]")
+        raise typer.Exit(code=0)
+
+    # dry_run=True skips dispatch; storage still records but that's harmless
+    # here because the same ticks are re-entrant by design. Using check_alerts
+    # keeps the banner math identical to the dashboard.
+    result = check_alerts(cfg, dry_run=True)
+
+    if as_json:
+        console.print_json(
+            data={
+                "banner": [
+                    {"text": line.text, "severity": line.severity}
+                    for line in result.banner_lines
+                ]
+            }
+        )
+        return
+
+    if not result.banner_lines:
+        console.print("[dim]all clear — no thresholds armed.[/dim]")
+        return
+    for line in result.banner_lines:
+        console.print(f"[{_severity_style(line.severity)}]{line.text}[/]")
 
 
 def _parse_iso(value: str) -> datetime | None:

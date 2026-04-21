@@ -77,6 +77,35 @@ class SubscriptionBinding:
 
 
 @dataclass(frozen=True)
+class ThresholdRuleConfig:
+    """User-editable threshold rule stored under ``[[thresholds]]``.
+
+    Mirrors :class:`tokie_cli.alerts.thresholds.ThresholdRule` but stays in
+    this module so ``tokie.toml`` can be parsed without importing the alerts
+    package (which pulls in ``httpx`` / ``desktop_notifier``). The engine
+    converts these to runtime :class:`ThresholdRule` objects on demand.
+    """
+
+    plan_id: str | None = None
+    account_id: str | None = None
+    levels: tuple[int, ...] = (75, 95, 100)
+    channels: tuple[str, ...] = ("banner",)
+
+
+@dataclass(frozen=True)
+class WebhookConfigEntry:
+    """One ``[[channels.webhook]]`` entry: name + format.
+
+    The secret URL lives in the OS keyring (``tokie-webhook/<name>``) and
+    never in the TOML file; see :mod:`tokie_cli.alerts.channels` for the
+    lookup contract.
+    """
+
+    name: str
+    format: str = "slack"
+
+
+@dataclass(frozen=True)
 class TokieConfig:
     """Root config object. Immutable — use :func:`replace` to edit."""
 
@@ -86,6 +115,9 @@ class TokieConfig:
     dashboard_port: int = 7878
     collectors: tuple[CollectorConfig, ...] = ()
     subscriptions: tuple[SubscriptionBinding, ...] = ()
+    thresholds: tuple[ThresholdRuleConfig, ...] = ()
+    webhooks: tuple[WebhookConfigEntry, ...] = ()
+    alerts_desktop_enabled: bool = False
 
     def with_collector(self, collector: CollectorConfig) -> TokieConfig:
         """Return a new config with ``collector`` appended or replaced by name."""
@@ -102,6 +134,33 @@ class TokieConfig:
             if not (b.plan_id == binding.plan_id and b.account_id == binding.account_id)
         )
         return replace(self, subscriptions=(*kept, binding))
+
+    def with_threshold(self, rule: ThresholdRuleConfig) -> TokieConfig:
+        """Return a new config with ``rule`` appended (or replaced by identity).
+
+        Identity is ``(plan_id, account_id)`` — editing a rule targeted at a
+        specific binding overwrites in place; adding a new global rule just
+        appends.
+        """
+
+        kept = tuple(
+            r
+            for r in self.thresholds
+            if not (r.plan_id == rule.plan_id and r.account_id == rule.account_id)
+        )
+        return replace(self, thresholds=(*kept, rule))
+
+    def without_threshold(
+        self, *, plan_id: str | None, account_id: str | None
+    ) -> TokieConfig:
+        """Remove the rule that exactly matches this ``(plan_id, account_id)``."""
+
+        kept = tuple(
+            r
+            for r in self.thresholds
+            if not (r.plan_id == plan_id and r.account_id == account_id)
+        )
+        return replace(self, thresholds=kept)
 
 
 class ConfigError(Exception):
@@ -157,6 +216,82 @@ def _parse_subscriptions(raw: Any) -> tuple[SubscriptionBinding, ...]:
     return tuple(out)
 
 
+def _parse_thresholds(raw: Any) -> tuple[ThresholdRuleConfig, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError("'thresholds' must be an array of tables")
+    out: list[ThresholdRuleConfig] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"thresholds[{i}] must be a table")
+        plan_id = entry.get("plan_id")
+        if plan_id is not None and not isinstance(plan_id, str):
+            raise ConfigError(f"thresholds[{i}].plan_id must be a string or omitted")
+        account_id = entry.get("account_id")
+        if account_id is not None and not isinstance(account_id, str):
+            raise ConfigError(f"thresholds[{i}].account_id must be a string or omitted")
+        levels_raw = entry.get("levels", [75, 95, 100])
+        if not isinstance(levels_raw, list):
+            raise ConfigError(f"thresholds[{i}].levels must be an array of integers")
+        levels: list[int] = []
+        for lvl in levels_raw:
+            if not isinstance(lvl, int) or isinstance(lvl, bool):
+                raise ConfigError(f"thresholds[{i}].levels entries must be integers")
+            levels.append(lvl)
+        channels_raw = entry.get("channels", ["banner"])
+        if not isinstance(channels_raw, list) or not all(
+            isinstance(c, str) for c in channels_raw
+        ):
+            raise ConfigError(f"thresholds[{i}].channels must be an array of strings")
+        out.append(
+            ThresholdRuleConfig(
+                plan_id=plan_id or None,
+                account_id=account_id or None,
+                levels=tuple(levels),
+                channels=tuple(channels_raw),
+            )
+        )
+    return tuple(out)
+
+
+def _parse_channels(raw: Any) -> tuple[tuple[WebhookConfigEntry, ...], bool]:
+    """Return ``(webhooks, alerts_desktop_enabled)`` for the ``[channels]`` table.
+
+    Shape::
+
+        [channels]
+        desktop = true   # opt in to desktop notifications
+
+        [[channels.webhook]]
+        name = "team-slack"
+        format = "slack"
+    """
+
+    if raw is None:
+        return ((), False)
+    if not isinstance(raw, dict):
+        raise ConfigError("'channels' must be a table")
+    desktop_enabled = bool(raw.get("desktop", False))
+    webhook_raw = raw.get("webhook", [])
+    if not isinstance(webhook_raw, list):
+        raise ConfigError("'channels.webhook' must be an array of tables")
+    webhooks: list[WebhookConfigEntry] = []
+    for i, entry in enumerate(webhook_raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"channels.webhook[{i}] must be a table")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"channels.webhook[{i}].name must be a non-empty string")
+        fmt = entry.get("format", "slack")
+        if not isinstance(fmt, str) or fmt.lower() not in {"slack", "discord", "raw"}:
+            raise ConfigError(
+                f"channels.webhook[{i}].format must be one of: slack, discord, raw"
+            )
+        webhooks.append(WebhookConfigEntry(name=name, format=fmt.lower()))
+    return (tuple(webhooks), desktop_enabled)
+
+
 def load_config(path: Path | str | None = None) -> TokieConfig:
     """Load config from ``path`` or the default location.
 
@@ -188,6 +323,7 @@ def load_config(path: Path | str | None = None) -> TokieConfig:
     if not isinstance(port, int) or not (0 < port < 65536):
         raise ConfigError("'core.dashboard_port' must be an integer in (0, 65536)")
 
+    webhooks, desktop_enabled = _parse_channels(data.get("channels"))
     return TokieConfig(
         db_path=db_path,
         audit_log_path=audit_path,
@@ -195,6 +331,9 @@ def load_config(path: Path | str | None = None) -> TokieConfig:
         dashboard_port=port,
         collectors=_parse_collectors(data.get("collectors")),
         subscriptions=_parse_subscriptions(data.get("subscriptions")),
+        thresholds=_parse_thresholds(data.get("thresholds")),
+        webhooks=webhooks,
+        alerts_desktop_enabled=desktop_enabled,
     )
 
 
@@ -221,6 +360,21 @@ def save_config(config: TokieConfig, path: Path | str | None = None) -> Path:
         "subscriptions": [
             {"plan_id": b.plan_id, "account_id": b.account_id} for b in config.subscriptions
         ],
+        "thresholds": [
+            {
+                **({"plan_id": r.plan_id} if r.plan_id is not None else {}),
+                **({"account_id": r.account_id} if r.account_id is not None else {}),
+                "levels": list(r.levels),
+                "channels": list(r.channels),
+            }
+            for r in config.thresholds
+        ],
+        "channels": {
+            "desktop": bool(config.alerts_desktop_enabled),
+            "webhook": [
+                {"name": w.name, "format": w.format} for w in config.webhooks
+            ],
+        },
     }
 
     target.write_bytes(tomli_w.dumps(payload).encode("utf-8"))
@@ -234,7 +388,9 @@ __all__ = [
     "CollectorConfig",
     "ConfigError",
     "SubscriptionBinding",
+    "ThresholdRuleConfig",
     "TokieConfig",
+    "WebhookConfigEntry",
     "config_dir",
     "data_dir",
     "default_audit_log_path",
