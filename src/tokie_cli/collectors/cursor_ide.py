@@ -1,35 +1,30 @@
-"""Collector for Cursor IDE usage drops (unofficial, feature-flagged).
+"""Collector for Cursor IDE usage.
 
-Cursor's team does NOT expose a public, per-user historical usage endpoint.
-Their web dashboard at ``https://cursor.com/dashboard`` is the only
-vendor-authoritative surface, and it uses short-lived session cookies that
-rotate without notice. Reverse-engineering that surface breaks every time
-Cursor ships a new auth flow, which is why Tokie ships Cursor support
-strictly as a drop-ingest collector with an explicit ``ESTIMATED``
-confidence tier.
+Two complementary scan paths are supported:
 
-Users populate this collector one of two ways:
+1. **Local SQLite (auto, preferred).** Cursor stores per-message metadata in
+   ``state.vscdb`` (a SQLite database inside the global VSCode storage
+   directory). Tokie reads ``cursorDiskKV`` rows (``bubbleId:*`` keys) to
+   extract one event per assistant response, and ``ItemTable`` rows
+   (``aiCodeTracking.dailyStats.v1.5.*`` keys) for daily code-line activity.
+   Token counts are NOT stored locally by Cursor — only timestamp, model name,
+   and conversation membership are available — so confidence is ``ESTIMATED``.
+   This path is fully automatic: if ``state.vscdb`` exists, the collector
+   detects and reads it without any user setup.
 
-1. **Manual export (recommended).** Export the per-request CSV from
+2. **File-drop (manual fallback).** Export the per-request CSV from
    Cursor's dashboard ("Request history" → "Download CSV"), drop it into
-   ``~/.cursor/history/`` (or set ``TOKIE_CURSOR_LOG`` to a file/dir), and
-   re-run ``tokie scan``. Tokie parses request rows, uses Cursor's
-   ``model`` column as the canonical model name, and applies a fixed-ratio
-   token estimator for each request (since the CSV omits token counts).
-2. **NDJSON wrapper (advanced).** Pipe your own HTTP wrapper's response
-   usage blocks into NDJSON in the same shape as ``copilot_cli``/``api_gemini``.
-   Tokie will prefer NDJSON rows (``EXACT`` confidence) over CSV rows
-   (``ESTIMATED`` confidence) when both contain the same request id.
+   ``~/.cursor/history/`` (or set ``TOKIE_CURSOR_LOG``), and re-run
+   ``tokie scan``. Confidence is ``ESTIMATED`` (token counts derived from a
+   fixed heuristic). Optionally pipe your own HTTP wrapper's response usage
+   blocks into NDJSON format for ``EXACT`` confidence.
 
 Feature flag: the collector is **disabled by default**. Opt in by setting
-``[collectors.cursor-ide] enabled = true`` in ``tokie.toml`` or by running
-``tokie doctor --enable cursor-ide``. ``detect()`` still returns True when
-drops exist so users get the nudge to enable the collector.
+``[collectors.cursor-ide] enabled = true`` in ``tokie.toml``.
 
 No prompt content, code context, or embeddings are parsed or logged — only
-model name, timestamp, request id, and (when available) token counts leave
-this module. Cost calculation is delegated to the aggregation layer using
-the ``plans.yaml`` cost table.
+model name, timestamp, bubble ID, and (when available) token counts leave
+this module.
 """
 
 from __future__ import annotations
@@ -39,8 +34,10 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
+import sys
 from collections.abc import AsyncIterator, Iterator
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +57,39 @@ _CSV_REQUEST_CANDIDATES: tuple[str, ...] = ("request_id", "id", "requestId")
 
 _ESTIMATED_INPUT_TOKENS_PER_REQUEST = 4000
 _ESTIMATED_OUTPUT_TOKENS_PER_REQUEST = 600
+
+# Type-2 bubbles are assistant responses (type-1 are human messages).
+# We count type-2 as "one request" against the monthly quota.
+_BUBBLE_TYPE_ASSISTANT = "2"
+
+
+def _state_vscdb_candidates() -> tuple[Path, ...]:
+    """Candidate paths for Cursor's global state.vscdb (platform-specific)."""
+    home = Path.home()
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        candidates.append(
+            appdata / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        )
+    elif sys.platform == "darwin":
+        candidates.append(
+            home / "Library" / "Application Support" / "Cursor" / "User"
+            / "globalStorage" / "state.vscdb"
+        )
+    else:
+        xdg = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+        candidates.append(
+            xdg / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        )
+    return tuple(candidates)
+
+
+def _find_state_vscdb() -> Path | None:
+    for p in _state_vscdb_candidates():
+        if p.is_file():
+            return p
+    return None
 
 
 def _candidate_roots() -> tuple[Path, ...]:
@@ -127,11 +157,11 @@ def _first_present(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
 
 
 class CursorIDECollector(Collector):
-    """Cursor IDE drop-ingest collector.
+    """Cursor IDE collector — reads local state.vscdb and/or manual file drops.
 
-    Confidence is ``ESTIMATED`` for CSV rows (token counts are derived from
-    a fixed heuristic since the vendor CSV omits them) and ``EXACT`` for
-    user-supplied NDJSON rows that carry a real ``usage`` block.
+    Confidence is always ``ESTIMATED`` because Cursor does not persist token
+    counts in the local database; we can record that a request happened and
+    which model was used, but not how many tokens it consumed.
     """
 
     name = "cursor-ide"
@@ -139,12 +169,18 @@ class CursorIDECollector(Collector):
 
     @classmethod
     def detect(cls) -> bool:
-        return bool(_resolve_paths())
+        return bool(_find_state_vscdb()) or bool(_resolve_paths())
 
     def scan(self, since: datetime | None = None) -> AsyncIterator[UsageEvent]:
         return aiterate(self._scan_sync(since))
 
     def _scan_sync(self, since: datetime | None) -> Iterator[UsageEvent]:
+        # Primary path: local SQLite database
+        db_path = _find_state_vscdb()
+        if db_path:
+            yield from self._scan_sqlite(db_path, since)
+
+        # Fallback / supplementary path: manual file drops
         for path in _resolve_paths():
             try:
                 if path.suffix.lower() in _CSV_SUFFIXES:
@@ -155,6 +191,88 @@ class CursorIDECollector(Collector):
                 logger.warning(
                     "cursor-ide: cannot read %s (%s)", path.name, type(exc).__name__
                 )
+
+    def _scan_sqlite(self, db_path: Path, since: datetime | None) -> Iterator[UsageEvent]:
+        """Read assistant-response bubbles from Cursor's local state.vscdb.
+
+        Each type-2 (assistant) bubble is one request against the monthly
+        quota.  Token counts are not stored locally; we emit 0 so the event
+        registers as a message without inflating the token totals.
+        """
+        try:
+            # Open in read-only URI mode to avoid locking the live DB.
+            uri = db_path.as_uri() + "?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, timeout=5)
+        except sqlite3.OperationalError:
+            # WAL mode fallback: open normally but read-only flag via pragma.
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=5)
+            except sqlite3.OperationalError as exc:
+                logger.warning("cursor-ide: cannot open %s (%s)", db_path.name, exc)
+                return
+
+        try:
+            yield from self._read_bubbles(conn, since)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cursor-ide: error reading bubbles (%s)", exc)
+        finally:
+            conn.close()
+
+    def _read_bubbles(
+        self, conn: sqlite3.Connection, since: datetime | None
+    ) -> Iterator[UsageEvent]:
+        """Yield one UsageEvent per assistant response bubble."""
+        try:
+            cursor = conn.execute(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+            )
+        except sqlite3.OperationalError as exc:
+            logger.warning("cursor-ide: cursorDiskKV query failed (%s)", exc)
+            return
+
+        since_ts = since.isoformat() if since else None
+
+        for _key, raw_val in cursor:
+            try:
+                bubble = json.loads(raw_val)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            # Only assistant responses (type == "2") count as a request.
+            if str(bubble.get("type", "")) != _BUBBLE_TYPE_ASSISTANT:
+                continue
+
+            created_raw = bubble.get("createdAt", "")
+            if not created_raw:
+                continue
+
+            occurred_at = _parse_timestamp(str(created_raw))
+            if occurred_at is None:
+                continue
+
+            # Apply since filter using string comparison (ISO sorts lexically).
+            if since_ts and str(created_raw)[:26] < since_ts[:26]:
+                continue
+
+            bubble_id = str(bubble.get("bubbleId", "") or _key.split(":")[-1])
+            model = str(bubble.get("modelType") or bubble.get("model") or "cursor-auto")
+
+            yield self.make_event(
+                occurred_at=occurred_at,
+                provider="cursor",
+                product="cursor-ide",
+                account_id="default",
+                model=model,
+                # Token counts are NOT stored in the local DB.
+                input_tokens=0,
+                output_tokens=0,
+                session_id=str(bubble.get("composerId", "") or ""),
+                raw_hash=hashlib.sha256(
+                    f"cursor-bubble:{bubble_id}".encode()
+                ).hexdigest(),
+                source=f"cursor-ide:state.vscdb:{bubble_id[:8]}",
+                confidence=Confidence.ESTIMATED,
+            )
 
     def _scan_csv(self, path: Path, since: datetime | None) -> Iterator[UsageEvent]:
         with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
@@ -247,8 +365,10 @@ class CursorIDECollector(Collector):
                 )
 
     def health(self) -> CollectorHealth:
-        paths = _resolve_paths()
-        if not paths:
+        db_path = _find_state_vscdb()
+        drop_paths = _resolve_paths()
+
+        if not db_path and not drop_paths:
             return CollectorHealth(
                 name=self.name,
                 detected=False,
@@ -256,21 +376,30 @@ class CursorIDECollector(Collector):
                 last_scan_at=None,
                 last_scan_events=0,
                 message=(
-                    "cursor-ide is opt-in: export CSV from cursor.com/dashboard "
-                    "into ~/.cursor/history/ or set TOKIE_CURSOR_LOG"
+                    "cursor state.vscdb not found; also no drop files in "
+                    "~/.cursor/history/ — is Cursor installed?"
                 ),
             )
+
+        sources: list[str] = []
+        warnings: list[str] = []
+        if db_path:
+            sources.append(f"local db ({db_path.name})")
+            warnings.append(
+                "token counts are not stored locally — events register as "
+                "requests (messages) only; token totals will show 0"
+            )
+        if drop_paths:
+            sources.append(f"{len(drop_paths)} drop file(s)")
+
         return CollectorHealth(
             name=self.name,
             detected=True,
             ok=True,
             last_scan_at=None,
             last_scan_events=0,
-            message=f"found {len(paths)} drop file(s)",
-            warnings=(
-                "cursor has no public usage API — CSV rows are ESTIMATED "
-                "confidence; NDJSON rows with usage blocks are EXACT",
-            ),
+            message=f"found {', '.join(sources)}",
+            warnings=tuple(warnings),
         )
 
 

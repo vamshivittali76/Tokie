@@ -1352,11 +1352,19 @@ def handoff(
 def _parse_iso(value: str) -> datetime | None:
     """Parse ``value`` as a tz-aware ISO-8601 datetime, or return ``None``.
 
-    Accepts the ``Z`` suffix as shorthand for ``+00:00``. Refuses naive
-    datetimes because mixing zones would poison ``since`` filtering.
+    Accepts plain dates (``YYYY-MM-DD``) as midnight UTC, and ``Z`` as
+    shorthand for ``+00:00``.  Refuses naive datetimes with an explicit time
+    component because mixing zones would poison ``since`` filtering.
     """
+    # Accept plain date: treat as midnight UTC.
+    stripped = value.strip()
+    if len(stripped) == 10:
+        try:
+            return datetime.fromisoformat(stripped).replace(tzinfo=UTC)
+        except ValueError:
+            return None
 
-    text = value.replace("Z", "+00:00") if value.endswith("Z") else value
+    text = stripped.replace("Z", "+00:00") if stripped.endswith("Z") else stripped
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
