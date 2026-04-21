@@ -1,108 +1,145 @@
-# Launch — Tokie v0.1.0
+# Launch — Tokie v1.0.0
 
-> Draft copy for the first public build-in-public post. Edit freely before
-> posting. Meant for X / LinkedIn / HackerNews / your newsletter.
+> Draft copy for the v1.0.0 launch post. Edit freely before posting.
+> Meant for X / LinkedIn / Hacker News / your newsletter.
 
 ---
 
 ## One-line pitch
 
 Tokie is a local-first CLI and dashboard that tracks token usage and
-subscription quotas across every AI tool you pay for. v0.1.0 ships seven
-collectors, a 24-entry plan catalog, and a honest-by-default dashboard that
-never mixes *exact* and *inferred* numbers.
+subscription quotas across every AI tool you pay for. v1.0.0 ships a
+plugin SDK, an MCP server so your agents can ask Tokie directly, and
+a honest-by-default dashboard that never mixes *exact* and *inferred*
+numbers.
 
 ## Launch post (X / short form)
 
-> I built Tokie in public in five working days.
+> I shipped Tokie v1.0.0 today — a local-first CLI + dashboard that
+> shows how much Claude Pro / ChatGPT / Gemini / Codex / Cursor / etc.
+> you've burned this cycle. Across every tool that bills you.
 >
-> It's a local-first CLI + localhost dashboard that shows how much of your
-> Claude Pro / ChatGPT / Gemini / Codex / every-other-AI-sub you've burned
-> this cycle, across every tool that sends you bills.
+> New in 1.0: plugin SDK (`tokie.collectors` entry-points +
+> pytest-tokie-connector) and an MCP server so Claude Code / Cursor /
+> Codex can ask Tokie "how much do I have left?" directly. Read-only,
+> stdio-only, zero network surface.
 >
-> No telemetry. No cloud. Keyring-only secrets. Loopback-only by default.
+> Six weeks, six releases, one solo developer. No telemetry. No cloud.
+> Keyring-only secrets. Loopback-only dashboard.
 >
-> uv tool install tokie-cli
+> uv tool install 'tokie-cli[mcp]'
 > tokie init && tokie dashboard
 >
 > Source: https://github.com/vamshivittali76/Tokie
 
 ## Launch post (long form — blog / HN)
 
-**Title:** I built a local-first AI usage tracker in 5 days and shipped it to PyPI
+**Title:** I shipped a local-first AI usage tracker with a plugin SDK in 6 weeks
 
 **Body:**
 
-Five working days ago I had a design doc called `TOKIE_DEVELOPMENT_PLAN_FINAL.md`
-and no code. Today `tokie-cli` is on PyPI at v0.1.0.
+Six weeks ago I had a design doc and no code. Today Tokie v1.0.0 is on
+PyPI, complete with a plugin SDK, an MCP server, and a 403-test suite
+that runs mypy `--strict` clean.
 
-Here's what it does in one screen of terminal:
+Here's what it does:
 
 ```
-$ uv tool install tokie-cli
+$ uv tool install 'tokie-cli[mcp]'
 $ tokie init
-  detected: claude-code (~/.claude/projects/...), codex (~/.codex/sessions/...)
+  detected: claude-code, codex, cursor-ide
 $ tokie scan
-  claude-code: 41 new events
-  codex: 12 new events
+  claude-code: 41 new / 53 seen (0.18s)
+  codex: 12 new / 15 seen (0.21s)
+  cursor-ide: 8 new / 8 seen (0.04s)
+  total new events: 61 (3 collectors in 0.22s)
 $ tokie dashboard
-  tokie dashboard -> http://127.0.0.1:7878  (Ctrl-C to stop)
+  http://127.0.0.1:7878
 ```
 
-The dashboard shows one progress bar per subscription. Claude Pro's rolling-5h
-and weekly windows are rendered as a single bar each because Tokie models the
-`shared_with` relationship between `claude-code`, `claude-web`, and
-`claude-desktop` — one bucket, not three. Exact numbers render as solid bars;
-estimated numbers as diagonal stripes; inferred numbers (web-only tools) as
-dashed outlines. Tokie never silently averages them together.
+Everything runs in parallel. The dashboard shows one progress bar per
+subscription — solid = exact, diagonal stripes = estimated, dashed =
+inferred. Tokie never silently averages tiers; if your Claude Pro
+weekly bucket has any inferred events, the bar renders dashed.
 
-### What's in v0.1.0
+### What's new in v1.0.0
 
-- **Seven collectors.** Local logs (Claude Code, Codex) and admin APIs
-  (Anthropic, OpenAI, Gemini, any OpenAI-compatible provider, and a manual
-  drop-file collector for the 14 web-only tools that have no local signal).
-- **24-entry plan catalog** with trackability tiers so the UI is honest
-  about what it can and can't observe.
-- **Loopback-only dashboard** with FastAPI + HTMX + Tailwind + Chart.js,
-  zero frontend build step, auto-refresh every 10s, Chart.js stacked 14-day
-  bar chart.
-- **231 tests, 36 source modules, mypy `--strict` clean, ruff clean.**
-- **Trusted Publishing to PyPI.** There is no `PYPI_TOKEN` in this repo or
-  in any of its secrets. Each release exchanges a GitHub OIDC token for
-  PyPI credentials on the fly.
+- **Plugin SDK.** Third parties ship collectors as installable
+  packages that register under the `tokie.collectors` entry-point
+  group. Built-ins win on name collision, but collisions are logged so
+  plugin authors know to pick a different name. A
+  `pytest-tokie-connector` contract plugin (shipped with `tokie-cli`
+  itself) gives authors `assert_collector_contract`,
+  `assert_scan_yields_valid_events`, and `assert_idempotent_rescan` for
+  free.
+- **MCP stdio server.** Four read-only tools for LLM agents:
+  `list_subscriptions`, `get_usage`, `get_remaining`, `suggest_tool`.
+  No TCP port. No network. No writes. Drop it into Claude Desktop /
+  Claude Code / Cursor / Codex with a four-line JSON config.
+- **Task recommender + handoff.** `tokie suggest code_review` ranks
+  your active subscriptions against a hand-tuned `task_routing.yaml`
+  matrix, discounting anything near its threshold. When you hit a
+  cap, `tokie handoff` emits a paste-ready brief so you can switch
+  tools without losing state.
+- **Threshold alerts** at 75 / 95 / 100 % of any window, dispatched to
+  desktop notifications or Slack/Discord webhooks, deduped per reset
+  cycle.
+- **Live TUI** (`tokie watch`) via Textual — per-subscription bars,
+  sparklines, and reset countdowns for terminal lovers.
+- **Parallel scans.** Every collector's `scan()` runs concurrently via
+  `asyncio.gather`. Wall-clock scan time tracks the slowest collector,
+  not the sum.
 
-### What's explicitly not in v0.1.0
+### Honest tracking
 
-ChatGPT web, Claude.ai web, Gemini Advanced, Perplexity Pro web, Cursor
-IDE, Copilot CLI, and the live Textual TUI. Everything in that list is on
-the roadmap for v0.2.0 (shipping next Friday).
+Tokie models the `shared_with` relationship between `claude-code`,
+`claude-web`, and `claude-desktop` so Claude Pro's rolling-5h and
+weekly buckets render as a single bar — one bucket, not three. If the
+vendor's own dashboard would show 68 %, Tokie shows 68 %.
 
-### Architecture notes
+Web-only tools (Claude.ai, ChatGPT, Gemini Advanced, Perplexity Pro,
+Grok, v0, Lovable, bolt.new, Manus, Devin, WisperFlow, Le Chat,
+DeepSeek web) use the **manual collector**: you drop a CSV and Tokie
+renders it with dashed outlines so you always know which numbers are
+inferred. We will not scrape your browser history or reverse-engineer
+session tokens.
 
-Read the planning docs — they have been maintained alongside the code:
+### Built in public
 
-- [`TOKIE_DEVELOPMENT_PLAN_FINAL.md`](TOKIE_DEVELOPMENT_PLAN_FINAL.md) — the
-  *what and why* (architecture, schema, scope decisions).
-- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — the *when* (the
-  6-week solo sprint).
+Weekly releases, every Friday, all on the public repo:
 
-### Caveats before you try it
+- v0.1.0: core + 7 collectors + minimal dashboard
+- v0.2.0: Cursor / Copilot / Gemini + Textual TUI + dashboard v2
+- v0.3.0: threshold alerts + desktop + Slack/Discord + editor UI
+- v0.4.0: task recommender + guided handoff + dashboard panel
+- v1.0.0-rc1: plugin SDK + MCP server + connector template
+- v1.0.0: launch-ready polish
 
-- Pre-alpha. The `UsageEvent` schema may change before v1.0.
-- Windows + macOS + Linux all work, but every test-session I ran was on
-  Windows 11. Please open issues for platform-specific breakage.
-- The `manual` collector is the only honest way to track web-only AI
-  tools. Tokie will not scrape your browser history or reverse-engineer
-  session tokens.
+Every week's CHANGELOG entry explains what shipped and why. See
+[CHANGELOG.md](CHANGELOG.md) for the full set.
+
+### Architecture
+
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the layered
+diagram and data flow. Short version: collectors → SQLite → pure
+aggregator → (CLI, TUI, dashboard, alert engine, MCP server).
+Everything downstream of the aggregator is a read-only view, which is
+why the same JSON powers the dashboard and the MCP tools without a
+cache-invalidation dance.
+
+For writing your own connector, read
+[`docs/CONNECTORS.md`](docs/CONNECTORS.md). The
+[`templates/tokie-connector-example/`](templates/tokie-connector-example)
+directory is a working minimal package you can `cp -R` and edit.
 
 ### Try it
 
 ```bash
-uv tool install tokie-cli   # or: pipx install tokie-cli
+uv tool install 'tokie-cli[mcp]'   # or: pipx install 'tokie-cli[mcp]'
 tokie init
 tokie doctor
 tokie scan
-tokie dashboard
+tokie dashboard                    # or: tokie watch, or: tokie mcp serve
 ```
 
 Source, issues, roadmap: https://github.com/vamshivittali76/Tokie
@@ -111,11 +148,16 @@ Source, issues, roadmap: https://github.com/vamshivittali76/Tokie
 
 ## Asset checklist (before posting)
 
-- [ ] Record a 10-15s GIF of `tokie dashboard` with real data and drop it at
-      `docs/assets/dashboard.gif`. Embed in the README's `## Dashboard`
-      section.
-- [ ] Take a clean terminal screenshot of `tokie doctor` for the X post.
-- [ ] Confirm that `uv tool install tokie-cli` on a fresh venv on a fresh
-      machine completes and `tokie version` prints `0.1.0`.
-- [ ] Update the PyPI long-description once rendered there (verify code
-      blocks and badges look right at https://pypi.org/project/tokie-cli/).
+- [ ] Record a 10-15 s GIF of `tokie dashboard` with real data in
+      light + dark theme; drop at `docs/assets/dashboard.gif`.
+- [ ] Record a 10-15 s GIF of `tokie watch` (Textual TUI); drop at
+      `docs/assets/tui.gif`.
+- [ ] Record a 20-30 s screencap of Claude Desktop calling
+      `list_subscriptions` via MCP; drop at `docs/assets/mcp.gif`.
+- [ ] Take a clean terminal screenshot of `tokie doctor` output showing
+      the plans.yaml freshness line.
+- [ ] Confirm `uv tool install 'tokie-cli[mcp]'` on a fresh venv +
+      fresh machine completes and `tokie version` prints `1.0.0`.
+- [ ] Verify PyPI long-description renders correctly (badges, code
+      blocks, links) at https://pypi.org/project/tokie-cli/.
+- [ ] Publish the GitHub release with the CHANGELOG entry as the body.

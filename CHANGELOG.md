@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-04-21
+
+The v1.0.0 launch cut. Freezes the public surface (`tokie` CLI,
+`tokie_cli.collectors`, `tokie_cli.testing`, `tokie_cli.dashboard.aggregator`,
+and the MCP tool schemas) under semver — breaking changes land in a
+hypothetical v2 with a migration guide, not by surprise.
+
+### Added (on top of v1.0.0-rc1)
+- **Parallel `tokie scan`** (`src/tokie_cli/cli.py::_run_scan`): every
+  collector's async `scan()` is drained concurrently via
+  `asyncio.gather`. Wall-clock scan time tracks the slowest collector
+  instead of the sum, per-collector duration is reported inline, and a
+  single broken collector no longer aborts the run — it is skipped
+  with a visible `[red]...[/red]` line and the others continue.
+- **`plans.yaml` freshness check**
+  (`src/tokie_cli/plans.py::load_plans_metadata`): exposes
+  header-only info (`version`, `updated`, `plan_count`, `age_days`,
+  `is_stale`) without paying for full subscription validation.
+  `tokie doctor` now prints a one-line plans banner: green/dim when
+  fresh, yellow when older than `PLANS_FRESHNESS_WARN_DAYS` (default
+  60 days). Vendor-limit drift is now a visible condition, not a
+  silent source of wrong saturation numbers.
+- **`docs/ARCHITECTURE.md`**: layered diagram and data-flow
+  walk-through covering collectors → SQLite → aggregator → (CLI, TUI,
+  dashboard, alerts, MCP). Explains why every surface reads from the
+  same pure aggregator without a cache-invalidation dance.
+- **`docs/FAQ.md`**: privacy, accuracy tiers, alert dedupe semantics,
+  MCP install + agent setup, extending Tokie without forking, state
+  reset, and common setup gotchas.
+- **README rewrite** around the v1.0.0 feature set with links to the
+  three docs above.
+
+### Changed
+- Version bumped from `1.0.0rc1` to `1.0.0` across `pyproject.toml`.
+- `tokie scan` terminal line now reports timing:
+  `total new events: N (K collectors in Ws)`.
+
+### Fixed
+- Minor pluralisation polish in `tokie scan` output
+  (`1 collector` vs `2 collectors`).
+
+### Security
+- No surface changes. The v1.0.0-rc1 security posture (keyring-only
+  secrets, loopback-only dashboard, read-only MCP) is the v1.0.0
+  posture.
+
 ## [1.0.0rc1] — 2026-04-21
 
 Week 5 of the build-in-public run: turn Tokie from a one-team app into a
