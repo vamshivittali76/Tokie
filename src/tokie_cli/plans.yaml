@@ -1,7 +1,14 @@
 version: 1
 updated: 2026-04-20
+# Every entry carries a `trackability` tier so the dashboard can render
+# untrackable web-only tools with the correct INFERRED badge and route
+# them to the manual-entry workflow.
+#   local_exact      — parsed from a vendor's own on-disk log
+#   api_exact        — pulled from a vendor admin/usage endpoint
+#   web_only_manual  — no local signal; user enters usage through `manual` collector
 plans:
   - id: claude_pro_personal
+    trackability: local_exact
     display_name: Claude Pro
     source_url: https://www.anthropic.com/pricing
     notes: Shared bucket across claude-code, claude-web, claude-desktop, claude-mobile.
@@ -20,6 +27,7 @@ plans:
           shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
 
   - id: claude_max5_personal
+    trackability: local_exact
     display_name: Claude Max 5x
     source_url: https://www.anthropic.com/max
     notes: 5x Pro allowance on the same shared bucket.
@@ -38,6 +46,7 @@ plans:
           shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
 
   - id: claude_max20_personal
+    trackability: local_exact
     display_name: Claude Max 20x
     source_url: https://www.anthropic.com/max
     notes: 20x Pro allowance.
@@ -56,6 +65,7 @@ plans:
           shared_with: [claude-code, claude-web, claude-desktop, claude-mobile]
 
   - id: anthropic_api_direct
+    trackability: api_exact
     display_name: Anthropic API (pay-as-you-go)
     source_url: https://docs.anthropic.com/en/api/rate-limits
     notes: No subscription window; billed per-token. Rate limits exist but are not quota caps.
@@ -69,6 +79,7 @@ plans:
         - window_type: none
 
   - id: openai_tier1
+    trackability: api_exact
     display_name: OpenAI API Tier 1
     source_url: https://platform.openai.com/docs/guides/rate-limits
     notes: New accounts; monthly spend cap around $100 depending on org settings.
@@ -83,6 +94,7 @@ plans:
           limit_usd: 100.0
 
   - id: openai_tier2
+    trackability: api_exact
     display_name: OpenAI API Tier 2
     source_url: https://platform.openai.com/docs/guides/rate-limits
     notes: After $50 paid and 7 days since first payment.
@@ -97,6 +109,7 @@ plans:
           limit_usd: 500.0
 
   - id: openai_tier3
+    trackability: api_exact
     display_name: OpenAI API Tier 3
     source_url: https://platform.openai.com/docs/guides/rate-limits
     notes: After $100 paid and 7 days since first payment.
@@ -111,6 +124,7 @@ plans:
           limit_usd: 1000.0
 
   - id: chatgpt_plus_personal
+    trackability: web_only_manual
     display_name: ChatGPT Plus
     source_url: https://openai.com/chatgpt/pricing/
     notes: Not locally trackable in v0.1 (web-only). Included so the UI can show it as INFERRED when users manually log usage.
@@ -125,6 +139,7 @@ plans:
           limit_messages: 80
 
   - id: cursor_pro_personal
+    trackability: local_exact
     display_name: Cursor Pro
     source_url: https://cursor.com/pricing
     notes: Monthly premium-model request allowance for individual Pro.
@@ -139,9 +154,10 @@ plans:
           limit_messages: 500
 
   - id: perplexity_pro_personal
+    trackability: web_only_manual
     display_name: Perplexity Pro
     source_url: https://www.perplexity.ai/hub/faq/what-is-perplexity-pro
-    notes: Pro Searches and Deep Research are daily-quotaed; not trackable locally (web-only) in v0.1.
+    notes: Pro Searches and Deep Research are daily-quotaed; web-only, no local signal.
     subscription:
       id: perplexity_pro_personal
       provider: perplexity
@@ -151,3 +167,219 @@ plans:
       windows:
         - window_type: daily
           limit_messages: 300
+
+  # ---------------------------------------------------------------------------
+  # v0.2 — web-only consumer chat (trackability: web_only_manual)
+  # ---------------------------------------------------------------------------
+
+  - id: chatgpt_pro_personal
+    trackability: web_only_manual
+    display_name: ChatGPT Pro
+    source_url: https://openai.com/chatgpt/pricing/
+    notes: Unlimited GPT-5 access; web-only, no local signal.
+    subscription:
+      id: chatgpt_pro_personal
+      provider: openai
+      product: chatgpt-web
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: none
+
+  - id: gemini_advanced_personal
+    trackability: web_only_manual
+    display_name: Gemini Advanced (Google One AI Premium)
+    source_url: https://one.google.com/about/ai-premium/
+    notes: Gemini 2.5 Pro in the web app and Workspace apps; web-only, no local signal.
+    subscription:
+      id: gemini_advanced_personal
+      provider: google
+      product: gemini-web
+      plan: advanced
+      account_id: default
+      windows:
+        - window_type: none
+
+  - id: google_ai_studio_free
+    trackability: web_only_manual
+    display_name: Google AI Studio (free)
+    source_url: https://aistudio.google.com/
+    notes: Free tier for prototyping; per-model daily request caps apply. Web-only.
+    subscription:
+      id: google_ai_studio_free
+      provider: google
+      product: ai-studio
+      plan: free
+      account_id: default
+      windows:
+        - window_type: daily
+          limit_messages: 500
+
+  - id: mistral_le_chat_pro
+    trackability: web_only_manual
+    display_name: Mistral Le Chat Pro
+    source_url: https://chat.mistral.ai/
+    notes: Mistral's consumer chat; web-only, no local signal.
+    subscription:
+      id: mistral_le_chat_pro
+      provider: mistral
+      product: le-chat-web
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: none
+
+  - id: deepseek_web
+    trackability: web_only_manual
+    display_name: DeepSeek Chat (web)
+    source_url: https://chat.deepseek.com/
+    notes: Free consumer chat; web-only, no local signal.
+    subscription:
+      id: deepseek_web
+      provider: deepseek
+      product: deepseek-web
+      plan: free
+      account_id: default
+      windows:
+        - window_type: none
+
+  - id: grok_premium_plus
+    trackability: web_only_manual
+    display_name: X Premium+ (Grok)
+    source_url: https://x.ai/grok
+    notes: Grok via X Premium+; web-only, no local signal.
+    subscription:
+      id: grok_premium_plus
+      provider: x-ai
+      product: grok-web
+      plan: premium_plus
+      account_id: default
+      windows:
+        - window_type: none
+
+  # ---------------------------------------------------------------------------
+  # v0.2 — autonomous / cloud-only agents (trackability: web_only_manual)
+  # ---------------------------------------------------------------------------
+
+  - id: manus_personal
+    trackability: web_only_manual
+    display_name: Manus
+    source_url: https://manus.im/
+    notes: Task-based autonomous agent; web-only, no local signal.
+    subscription:
+      id: manus_personal
+      provider: manus
+      product: manus-web
+      plan: personal
+      account_id: default
+      windows:
+        - window_type: monthly
+
+  - id: devin_team
+    trackability: web_only_manual
+    display_name: Devin (Cognition)
+    source_url: https://devin.ai/pricing
+    notes: Autonomous engineer billed in ACU (Agent Compute Units); web-only, no local signal.
+    subscription:
+      id: devin_team
+      provider: cognition
+      product: devin-web
+      plan: team
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_messages: 250
+
+  - id: wisperflow_pro
+    trackability: web_only_manual
+    display_name: WisperFlow Pro
+    source_url: https://wisprflow.ai/
+    notes: Voice-to-text AI dictation; web-only, no local signal.
+    subscription:
+      id: wisperflow_pro
+      provider: wisperflow
+      product: wisperflow-web
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: monthly
+
+  - id: v0_premium
+    trackability: web_only_manual
+    display_name: v0 by Vercel (Premium)
+    source_url: https://v0.dev/pricing
+    notes: Credit-based UI generation; web-only, no local signal.
+    subscription:
+      id: v0_premium
+      provider: vercel
+      product: v0-web
+      plan: premium
+      account_id: default
+      windows:
+        - window_type: monthly
+          limit_usd: 20.0
+
+  - id: bolt_pro
+    trackability: web_only_manual
+    display_name: bolt.new Pro
+    source_url: https://bolt.new/
+    notes: Token-based full-stack app generator; web-only, no local signal.
+    subscription:
+      id: bolt_pro
+      provider: stackblitz
+      product: bolt-new
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: monthly
+
+  - id: lovable_pro
+    trackability: web_only_manual
+    display_name: Lovable Pro
+    source_url: https://lovable.dev/pricing
+    notes: Credit-based app builder; web-only, no local signal.
+    subscription:
+      id: lovable_pro
+      provider: lovable-dev
+      product: lovable-web
+      plan: pro
+      account_id: default
+      windows:
+        - window_type: monthly
+
+  # ---------------------------------------------------------------------------
+  # v0.2 — API-tracked providers (trackability: api_exact)
+  # ---------------------------------------------------------------------------
+
+  - id: google_gemini_api
+    trackability: api_exact
+    display_name: Google Gemini API (paid)
+    source_url: https://ai.google.dev/pricing
+    notes: Paid Gemini API; Google Cloud Billing gates history, so Tokie parses local NDJSON drop files users (or the Gemini CLI) write.
+    subscription:
+      id: google_gemini_api
+      provider: google
+      product: gemini-api
+      plan: paid
+      account_id: default
+      windows:
+        - window_type: none
+
+  # ---------------------------------------------------------------------------
+  # v0.2 — local-exact developer tools (trackability: local_exact)
+  # ---------------------------------------------------------------------------
+
+  - id: codex_cli_with_chatgpt
+    trackability: local_exact
+    display_name: OpenAI Codex (CLI, included with ChatGPT Plus/Pro)
+    source_url: https://openai.com/codex/
+    notes: Session caps vary by ChatGPT tier; tracked via ~/.codex/sessions rollouts.
+    subscription:
+      id: codex_cli_with_chatgpt
+      provider: openai
+      product: codex
+      plan: included_with_plus_or_pro
+      account_id: default
+      windows:
+        - window_type: rolling_5h
+          limit_messages: 150

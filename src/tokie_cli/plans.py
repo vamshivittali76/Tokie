@@ -13,6 +13,7 @@ strategy": community PRs keep the file fresh, every entry carries a
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -26,10 +27,24 @@ __all__ = [
     "DEFAULT_PLANS_FILENAME",
     "PlanTemplate",
     "PlansFileError",
+    "Trackability",
     "bundled_plans_path",
     "get_plan",
     "load_plans",
 ]
+
+
+class Trackability(StrEnum):
+    """How Tokie can observe usage for this plan.
+
+    - LOCAL_EXACT: data comes from the vendor's own local logs (e.g. Claude Code JSONL).
+    - API_EXACT: data comes from a vendor admin-usage endpoint (e.g. Anthropic usage report).
+    - WEB_ONLY_MANUAL: no local signal exists; user enters usage via the manual collector.
+    """
+
+    LOCAL_EXACT = "local_exact"
+    API_EXACT = "api_exact"
+    WEB_ONLY_MANUAL = "web_only_manual"
 
 
 DEFAULT_PLANS_FILENAME: str = "plans.yaml"
@@ -53,6 +68,7 @@ class PlanTemplate:
     source_url: str
     notes: str | None
     subscription: Subscription
+    trackability: Trackability = Trackability.LOCAL_EXACT
 
 
 def bundled_plans_path() -> Path:
@@ -140,6 +156,21 @@ def load_plans(path: Path | str | None = None) -> list[PlanTemplate]:
         if notes_value is not None and not isinstance(notes_value, str):
             raise PlansFileError(f"Plan '{plan_id}' has a non-string 'notes' field.")
 
+        trackability_raw = entry.get("trackability")
+        if trackability_raw is None:
+            trackability = Trackability.LOCAL_EXACT
+        else:
+            if not isinstance(trackability_raw, str):
+                raise PlansFileError(f"Plan '{plan_id}' has a non-string 'trackability' field.")
+            try:
+                trackability = Trackability(trackability_raw)
+            except ValueError as exc:
+                valid = ", ".join(t.value for t in Trackability)
+                raise PlansFileError(
+                    f"Plan '{plan_id}' has an unknown trackability "
+                    f"{trackability_raw!r}. Valid values: {valid}."
+                ) from exc
+
         try:
             subscription = Subscription.model_validate(entry["subscription"])
         except ValidationError as exc:
@@ -152,6 +183,7 @@ def load_plans(path: Path | str | None = None) -> list[PlanTemplate]:
                 source_url=source_url,
                 notes=notes_value,
                 subscription=subscription,
+                trackability=trackability,
             )
         )
 

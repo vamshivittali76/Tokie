@@ -9,6 +9,7 @@ import pytest
 from tokie_cli.plans import (
     PlansFileError,
     PlanTemplate,
+    Trackability,
     bundled_plans_path,
     get_plan,
     load_plans,
@@ -159,3 +160,77 @@ def test_get_plan_raises_on_unknown_id_with_available_ids() -> None:
     message = str(excinfo.value)
     assert "does_not_exist" in message
     assert "claude_pro_personal" in message
+
+
+def test_trackability_enum_values() -> None:
+    assert Trackability.LOCAL_EXACT.value == "local_exact"
+    assert Trackability.API_EXACT.value == "api_exact"
+    assert Trackability.WEB_ONLY_MANUAL.value == "web_only_manual"
+
+
+def test_plan_template_defaults_to_local_exact(tmp_path: Path) -> None:
+    plans_file = tmp_path / "custom_plans.yaml"
+    plans_file.write_text(MINIMAL_VALID_YAML, encoding="utf-8")
+    plans = load_plans(plans_file)
+    assert plans[0].trackability is Trackability.LOCAL_EXACT
+
+
+def test_web_only_manual_entries_exist() -> None:
+    plans = load_plans()
+    web_only = [p for p in plans if p.trackability is Trackability.WEB_ONLY_MANUAL]
+    assert len(web_only) >= 8, (
+        f"expected at least 8 web-only plans, found {len(web_only)}: {[p.id for p in web_only]}"
+    )
+
+
+def test_api_exact_entries_exist() -> None:
+    plans = load_plans()
+    ids = {p.id: p.trackability for p in plans}
+    assert ids["anthropic_api_direct"] is Trackability.API_EXACT
+    assert ids["openai_tier1"] is Trackability.API_EXACT
+    assert ids["google_gemini_api"] is Trackability.API_EXACT
+
+
+def test_manus_devin_wisperflow_entries_present() -> None:
+    plans = load_plans()
+    ids = {p.id for p in plans}
+    assert {"manus_personal", "devin_team", "wisperflow_pro"} <= ids
+
+
+def test_every_web_only_entry_explains_why_in_notes() -> None:
+    plans = load_plans()
+    for template in plans:
+        if template.trackability is not Trackability.WEB_ONLY_MANUAL:
+            continue
+        assert template.notes, f"{template.id} is web-only but has no notes"
+        lowered = template.notes.lower()
+        assert "web-only" in lowered or "no local signal" in lowered, (
+            f"{template.id} notes must explain why it's untrackable: {template.notes!r}"
+        )
+
+
+def test_load_plans_rejects_unknown_trackability(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        """
+version: 1
+updated: "2026-04-20"
+plans:
+  - id: bogus
+    trackability: telepathy
+    display_name: Bogus
+    source_url: https://example.com
+    subscription:
+      id: bogus
+      provider: example
+      product: example-api
+      plan: free
+      account_id: default
+      windows:
+        - window_type: none
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(PlansFileError) as excinfo:
+        load_plans(bad)
+    assert "telepathy" in str(excinfo.value)

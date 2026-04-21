@@ -33,6 +33,7 @@ dependencies = [
     "keyring>=25.0",
     "desktop-notifier>=6.0",
     "platformdirs>=4.2",
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -96,6 +97,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S", "N802"]
 "scripts/**/*.py" = ["S"]
+"src/tokie_cli/cli.py" = ["B008"]  # typer.Option() in defaults is idiomatic
 
 [tool.ruff.format]
 quote-style = "double"

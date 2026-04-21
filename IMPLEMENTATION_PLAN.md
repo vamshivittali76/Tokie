@@ -87,14 +87,21 @@ flowchart LR
 - [x] `src/tokie_cli/windows.py`: rolling-5h / daily / weekly / monthly math. Unit-tested.
 - [x] Seed `plans.yaml` with Claude Pro/Max, OpenAI tier 1–3, Anthropic API (plus ChatGPT Plus, Cursor Pro, Perplexity Pro — 10 entries total).
 
-### Day 4 (Thu, ~5 hrs) — Collectors + CLI
+### Day 4 (Thu, ~5 hrs) — Collectors + CLI  ✅ delivered Day 3
 
-- [ ] `collectors/base.py`: `Collector` ABC per §8.
-- [ ] `collectors/claude_code.py`: port the Phase 0 discovery script into a proper collector.
-- [ ] `collectors/codex.py`: same shape.
-- [ ] `collectors/api_anthropic.py` + `api_openai.py`: pull from official usage endpoints, key via `keyring`.
-- [ ] `collectors/manual.py`: CSV/JSON import stub.
-- [ ] `cli.py`: `tokie init`, `tokie doctor`, `tokie scan`, `tokie status` (Rich progress bars with confidence styling).
+- [x] `collectors/base.py`: `Collector` ABC per §8, `CollectorHealth`, `make_event` helper, default `watch` polling.
+- [x] `config.py`: `TokieConfig`, platformdirs paths, TOML roundtrip via `tomli-w`, env-var overrides, 0600 perms on POSIX.
+- [x] `collectors/claude_code.py`: JSONL session parser with env-var root override. Confidence.EXACT.
+- [x] `collectors/codex.py`: parses both old (chat-completions) and new (responses-API) rollout shapes. Confidence.EXACT.
+- [x] `collectors/api_anthropic.py`: Admin usage-report endpoint, keyring auth, pagination + retry. Confidence.EXACT.
+- [x] `collectors/api_openai.py`: `/v1/organization/usage/completions`, keyring auth, Bearer header. Confidence.EXACT.
+- [x] `collectors/api_gemini.py`: local NDJSON tailer (Google has no usage endpoint); handles `thoughtsTokenCount`. Confidence.EXACT.
+- [x] `collectors/api_openai_compatible.py`: generic NDJSON tailer for **Groq, Together AI, DeepSeek, OpenRouter, Mistral, xAI Grok, Fireworks, Anyscale, Perplexity Sonar, Cerebras, Ollama, vLLM, LiteLLM** — one collector, ~13 providers covered. Confidence.EXACT.
+- [x] `collectors/manual.py`: CSV/YAML drop-file collector for untrackable web tools. Confidence.INFERRED.
+- [x] `collectors/manual_templates/`: starter CSV + README bundled in wheel covering Manus, WisperFlow, Gemini Advanced, Google AI Studio, v0, bolt.new, Lovable, Devin, Le Chat, DeepSeek web, Grok web, Perplexity Pro, ChatGPT web, Claude.ai web.
+- [x] `plans.yaml` expanded 10 → 24 entries. New `Trackability` enum (`local_exact` / `api_exact` / `web_only_manual`) tags every entry and powers the CLI's `plans --tier` filter.
+- [x] `cli.py`: Typer app with `version`, `paths`, `init`, `doctor`, `scan`, `status`, `plans` commands. All support `--json` for scripting. Verified end-to-end against real `~/.claude` data.
+- [x] 204 tests passing (up from 72), mypy --strict clean on 31 modules, ruff clean.
 
 ### Day 5 (Fri, ~5 hrs) — Dashboard + ship
 
