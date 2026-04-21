@@ -1,24 +1,46 @@
 [project]
 name = "tokie-cli"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Local-first CLI and dashboard that tracks token usage and subscription quotas across every AI tool you pay for."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Tokie contributors" }]
-keywords = ["ai", "llm", "tokens", "usage", "claude", "cursor", "openai", "quota", "cli"]
+keywords = [
+    "ai",
+    "llm",
+    "tokens",
+    "usage",
+    "claude",
+    "cursor",
+    "openai",
+    "gemini",
+    "anthropic",
+    "quota",
+    "dashboard",
+    "cli",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
     "Topic :: Software Development",
+    "Topic :: System :: Monitoring",
     "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 dependencies = [
     "typer>=0.12",
@@ -52,10 +74,12 @@ dev = [
 tokie = "tokie_cli.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/tokie-dev/tokie"
-Documentation = "https://github.com/tokie-dev/tokie#readme"
-Issues = "https://github.com/tokie-dev/tokie/issues"
-Changelog = "https://github.com/tokie-dev/tokie/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/vamshivittali76/Tokie"
+Repository = "https://github.com/vamshivittali76/Tokie"
+Documentation = "https://github.com/vamshivittali76/Tokie#readme"
+Issues = "https://github.com/vamshivittali76/Tokie/issues"
+Changelog = "https://github.com/vamshivittali76/Tokie/blob/main/CHANGELOG.md"
+"Build in public" = "https://github.com/vamshivittali76/Tokie/blob/main/IMPLEMENTATION_PLAN.md"
 
 [build-system]
 requires = ["hatchling"]
@@ -68,13 +92,18 @@ packages = ["src/tokie_cli"]
 # come along for free without needing explicit force-include entries.
 
 [tool.hatch.build.targets.sdist]
+# Only the files we explicitly want to ship — keeps the sdist clean
+# of .planning/, .venv/, dist/, terminal dumps, and local IDE config.
 include = [
-    "src/tokie_cli",
-    "plans.yaml",
-    "task_routing.yaml",
-    "README.md",
-    "LICENSE",
-    "CHANGELOG.md",
+    "/src/tokie_cli",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/SECURITY.md",
+    "/pyproject.toml",
+    "/TOKIE_DEVELOPMENT_PLAN_FINAL.md",
+    "/IMPLEMENTATION_PLAN.md",
 ]
 
 [tool.ruff]

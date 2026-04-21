@@ -1,35 +1,73 @@
 name: Release
 
+# Publish Tokie to PyPI via OIDC Trusted Publishing.
+#
+# Triggered by pushing a `v*` tag (e.g. `v0.1.0`, `v1.2.3`). The workflow
+# does NOT use a long-lived `PYPI_TOKEN`; instead each job exchanges a
+# short-lived OIDC token for PyPI credentials via the Trusted Publisher
+# config declared on https://pypi.org/manage/account/publishing/.
+#
+# Both the `tokie-cli` project on PyPI and on TestPyPI must have a
+# Trusted Publisher pointing at `vamshivittali76/Tokie` / workflow
+# `release.yml` / environment `pypi` (or `testpypi`) before the first run.
+
 on:
   push:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
       - name: Set up Python
         run: uv python install 3.12
+      - name: Verify tag matches pyproject version
+        id: version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          proj=$(python -c "import tomllib,sys; print(tomllib.loads(open('pyproject.toml','rb').read().decode())['project']['version'])")
+          echo "tag: $tag   pyproject: $proj"
+          if [ "$tag" != "$proj" ]; then
+            echo "::error::tag ($tag) does not match pyproject.toml version ($proj)"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
       - name: Build
         run: uv build
+      - name: Install the wheel in a clean venv and smoke-test
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --upgrade pip
+          /tmp/verify/bin/pip install dist/*.whl
+          /tmp/verify/bin/tokie version --json
+          /tmp/verify/bin/tokie plans --json | head -c 200
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish:
-    name: Publish to PyPI (trusted)
+  publish-testpypi:
+    name: Publish to TestPyPI
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: pypi
-      url: https://pypi.org/p/tokie
+      name: testpypi
+      url: https://test.pypi.org/p/tokie-cli
     permissions:
       id-token: write
     steps:
@@ -38,5 +76,48 @@ jobs:
         with:
           name: dist
           path: dist/
-      - name: Publish
+      - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tokie-cli
+    permissions:
+      id-token: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(needs.build.outputs.version, 'rc') || contains(needs.build.outputs.version, 'a') || contains(needs.build.outputs.version, 'b') }}

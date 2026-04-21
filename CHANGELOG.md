@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-04-20
+
+First public release. Delivers the core spec from
+`TOKIE_DEVELOPMENT_PLAN_FINAL.md` Phase 1: a local-first CLI, seven
+collectors spanning the major AI vendors, a 24-entry plan catalog with
+trackability tiers, and a localhost dashboard with honest confidence
+rendering. Built in public across five working days.
+
+### Added (Day 5 — ship v0.1.0)
+- `LICENSE` (MIT) and `SECURITY.md` (loopback-only dashboard, no prompt content in logs, keyring-only secrets).
+- `.github/workflows/release.yml`: tag-triggered build -> TestPyPI -> PyPI -> GitHub Release pipeline using PyPI Trusted Publishing (OIDC). No long-lived API tokens anywhere in the repo. Verifies that the git tag matches `pyproject.toml` version before publishing.
+- `.github/workflows/dryrun-testpypi.yml`: manual `workflow_dispatch` for pushing to TestPyPI without cutting a tag.
+- `RELEASE.md`: step-by-step guide for cutting a release and the one-time Trusted Publisher setup.
+- `LAUNCH.md`: build-in-public launch note draft.
+
+### Changed
+- `pyproject.toml` version `0.1.0.dev0` -> `0.1.0`. Project URLs updated to the real repo (`vamshivittali76/Tokie`). Sdist include list cleaned of non-existent files and now pins exactly the files we want to ship.
+- Classifiers expanded: `Framework :: FastAPI`, `Typing :: Typed`, POSIX/macOS/Windows OS classifiers, `System :: Monitoring`, `Office/Business :: Financial`.
+
 ### Added (Day 4 — localhost dashboard)
 - `src/tokie_cli/dashboard/aggregator.py`: pure-function layer that turns raw events + bundled plan templates + user-bound `SubscriptionBinding`s into dashboard view-models. Respects `shared_with` for Claude Pro's multi-product buckets, anchors rolling-5h and weekly windows on the first event inside the lookback, enforces per-`account_id` isolation, and downgrades confidence to `INFERRED` for any `web_only_manual` plan regardless of what the event claims.
 - `src/tokie_cli/dashboard/server.py`: FastAPI app with `AppState` dependency-injection seam, endpoints `GET /api/health`, `/api/status`, `/api/subscriptions`, `/api/events`, `/api/daily`, and `GET /` for the HTML. `run()` refuses non-loopback binds without an explicit `allow_remote=True`.

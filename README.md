@@ -2,9 +2,13 @@
 
 > Local-first CLI and localhost dashboard that tracks token usage and subscription quotas across every AI tool you pay for. Warns before limits hit, and recommends the tool with the most capacity left.
 
-**Status:** pre-alpha. Building in public — [see the 6-week plan](IMPLEMENTATION_PLAN.md).
-**License:** MIT
-**Port:** `127.0.0.1:7878`
+[![PyPI version](https://img.shields.io/pypi/v/tokie-cli.svg)](https://pypi.org/project/tokie-cli/)
+[![Python versions](https://img.shields.io/pypi/pyversions/tokie-cli.svg)](https://pypi.org/project/tokie-cli/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/vamshivittali76/Tokie/actions/workflows/ci.yml/badge.svg)](https://github.com/vamshivittali76/Tokie/actions/workflows/ci.yml)
+
+**Status:** v0.1.0 (alpha). Building in public — [see the 6-week plan](IMPLEMENTATION_PLAN.md).
+**License:** MIT · **Default bind:** `127.0.0.1:7878`
 
 ---
 
@@ -14,31 +18,32 @@ You probably pay for at least two AI subscriptions. Nobody today gives you a sin
 
 Tokie is the unclaimed middle: a unified control plane for a solo developer's mixed AI stack.
 
-## Install (coming Friday of Week 1)
+## Install
 
 ```bash
-uv tool install tokie-cli
-tokie init
-tokie dashboard
+uv tool install tokie-cli   # or: pipx install tokie-cli
+tokie init                  # detects local collectors + writes default config
+tokie doctor                # shows which sources are ready
+tokie scan                  # ingest detected usage into ~/.local/share/tokie/tokie.db
+tokie dashboard             # opens http://127.0.0.1:7878
 ```
 
-The PyPI package is `tokie-cli` (the bare `tokie` slot is squatted by an unrelated tokenizer). The installed command is still `tokie`.
+The PyPI project is **`tokie-cli`** (the bare `tokie` slot is squatted by an unrelated tokenizer). The installed command is still `tokie`.
 
-## What Tokie tracks
+## What Tokie tracks in v0.1
 
-| Source | Supported | Confidence |
-|---|---|---|
-| Claude Code CLI | v0.1 | exact |
-| Codex CLI | v0.1 | exact |
-| Anthropic API | v0.1 | exact |
-| OpenAI API | v0.1 | exact |
-| Cursor IDE (individual Pro) | v0.2 | exact when endpoint works |
-| Gemini CLI | v0.2 | exact |
-| GitHub Copilot CLI | v0.2 | exact |
-| Perplexity API | v0.2 | exact |
-| Claude.ai web chat | not trackable locally | inferred (labeled) |
-| Perplexity web Pro Searches | not trackable locally | inferred (labeled) |
-| ChatGPT Plus web chat | not trackable locally | inferred (labeled) |
+**Local log collectors (exact):**
+- Claude Code CLI — parses `~/.claude/projects/**/*.jsonl`
+- Codex CLI — parses `~/.codex/sessions/**/rollout-*.jsonl` (both chat-completion and Responses API shapes)
+
+**API collectors (exact):** (credentials live in the OS keyring — never in config files)
+- Anthropic Admin usage-report endpoint
+- OpenAI Org usage-completions endpoint
+- Google Gemini (via local log tailing — Google has no historical usage endpoint)
+- **Generic OpenAI-compatible** — covers Groq, Together AI, DeepSeek, OpenRouter, Mistral, xAI Grok, Fireworks, Anyscale, Perplexity Sonar, Cerebras, Ollama, vLLM, LiteLLM — any provider that speaks OpenAI's `usage` block
+
+**Manual / inferred (web-only tools):**
+- Claude.ai web, ChatGPT web, Gemini Advanced, Google AI Studio, Le Chat, DeepSeek web, Grok web, Perplexity Pro, Manus, Devin, WisperFlow, v0, bolt.new, Lovable — 14 web-only plans with bundled CSV templates under `tokie scan --collector manual`.
 
 Tokie never silently averages `exact` and `inferred` data. If it can't track something honestly, the UI says so.
 
@@ -82,8 +87,8 @@ Design docs:
 
 ## Contributing
 
-Not open for contributions until v0.2. After that, see `CONTRIBUTING.md`.
+Not open for contributions until v0.2. After that, see `CONTRIBUTING.md`. Issues and bug reports are welcome now — [open one here](https://github.com/vamshivittali76/Tokie/issues).
 
 ## Security
 
-No telemetry by default. Credentials live in the OS keyring. Dashboard binds loopback only. Full policy in `SECURITY.md` (ships with v1.0).
+No telemetry by default. Credentials live in the OS keyring (never in `tokie.toml`). Dashboard binds loopback only — `--remote` is required to bind non-loopback interfaces and prints a visible warning because Tokie has no auth layer yet. Full policy: [`SECURITY.md`](SECURITY.md).
