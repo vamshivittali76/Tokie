@@ -82,6 +82,28 @@ _force_utf8_stdio()
 console = Console()
 err_console = Console(stderr=True)
 
+# ---------------------------------------------------------------------------
+# Brand banner
+# ---------------------------------------------------------------------------
+
+
+def _print_banner(ver: str = "") -> None:
+    """Print the Tokie welcome banner — skipped when stdout is not a TTY."""
+    if not console.is_terminal:
+        return
+    from rich.panel import Panel
+    from rich.text import Text
+
+    ver_str = ver or __version__
+
+    body = Text()
+    body.append("◈ ", style="bold gold1")
+    body.append("Tokie", style="bold white")
+    body.append(f"  v{ver_str}\n", style="dim")
+    body.append("  track every AI dollar", style="dim")
+
+    console.print(Panel(body, border_style="dim gold1", expand=False, padding=(0, 2)))
+
 def _collector_registry() -> dict[str, type[Collector]]:
     """Return the current merged collector registry.
 
@@ -147,10 +169,10 @@ def version(
         console.print_json(data=payload)
         return
 
-    console.print(f"[bold]tokie[/bold] {__version__}")
+    _print_banner(__version__)
     if plans_count is not None:
-        console.print(f"bundled plans: {plans_count}")
-    console.print(f"python: {payload['python']} ({payload['platform']})")
+        console.print(f"[dim]bundled plans:[/dim] {plans_count}")
+    console.print(f"[dim]python:[/dim] {payload['python']} ({payload['platform']})")
 
 
 @app.command()
@@ -217,6 +239,7 @@ def init(
     finally:
         conn.close()
 
+    _print_banner()
     console.print(f"[green]wrote[/green] {written}")
     console.print(f"[green]initialized db[/green] {cfg.db_path}")
     if detected:

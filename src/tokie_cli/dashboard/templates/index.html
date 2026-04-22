@@ -47,7 +47,31 @@
     <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
       <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center font-bold text-slate-950">T</div>
+          <!-- Tokie coin logo -->
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Tokie">
+            <defs>
+              <linearGradient id="coinGrad" x1="4" y1="4" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#f59e0b"/>
+                <stop offset="100%" stop-color="#d97706"/>
+              </linearGradient>
+              <linearGradient id="coinShine" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#fde68a" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <!-- Coin body -->
+            <circle cx="18" cy="18" r="17" fill="url(#coinGrad)"/>
+            <!-- Inner ring -->
+            <circle cx="18" cy="18" r="14" fill="none" stroke="#92400e" stroke-width="0.75" stroke-opacity="0.4"/>
+            <!-- Shine overlay -->
+            <circle cx="18" cy="18" r="17" fill="url(#coinShine)"/>
+            <!-- ◈ symbol: outer square diamond -->
+            <path d="M18 9 L27 18 L18 27 L9 18 Z" fill="none" stroke="#78350f" stroke-width="1" stroke-opacity="0.5"/>
+            <!-- ◈ symbol: inner diamond -->
+            <path d="M18 12.5 L23.5 18 L18 23.5 L12.5 18 Z" fill="#78350f" fill-opacity="0.35"/>
+            <!-- Center dot -->
+            <circle cx="18" cy="18" r="2" fill="#92400e" fill-opacity="0.6"/>
+          </svg>
           <div>
             <h1 class="text-lg font-semibold tracking-tight">Tokie</h1>
             <p class="text-xs text-slate-400">
@@ -96,15 +120,36 @@
     <!-- ============================ MAIN ============================ -->
     <main class="max-w-7xl mx-auto w-full px-6 py-6 flex-1 space-y-6">
 
-      <!-- Empty state -->
+      <!-- Empty / loading state -->
       <template x-if="!hasAnyData">
-        <section class="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-center">
-          <h2 class="text-xl font-semibold mb-2">No usage yet</h2>
-          <p class="text-slate-400 text-sm max-w-xl mx-auto">
-            Run <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie init</code> to enable
-            detected collectors, then <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie scan</code>
-            to ingest your usage. Refresh this page after — or toggle auto-refresh above.
-          </p>
+        <section class="rounded-xl border border-slate-800 bg-slate-900/60 p-12 flex flex-col items-center gap-5 text-center">
+          <!-- coin logo -->
+          <svg width="56" height="56" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" class="opacity-80">
+            <defs>
+              <linearGradient id="emptyGrad" x1="4" y1="4" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#f59e0b"/>
+                <stop offset="100%" stop-color="#d97706"/>
+              </linearGradient>
+              <linearGradient id="emptyShine" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#fde68a" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <circle cx="18" cy="18" r="17" fill="url(#emptyGrad)"/>
+            <circle cx="18" cy="18" r="14" fill="none" stroke="#92400e" stroke-width="0.75" stroke-opacity="0.4"/>
+            <circle cx="18" cy="18" r="17" fill="url(#emptyShine)"/>
+            <path d="M18 9 L27 18 L18 27 L9 18 Z" fill="none" stroke="#78350f" stroke-width="1" stroke-opacity="0.5"/>
+            <path d="M18 12.5 L23.5 18 L18 23.5 L12.5 18 Z" fill="#78350f" fill-opacity="0.35"/>
+            <circle cx="18" cy="18" r="2" fill="#92400e" fill-opacity="0.6"/>
+          </svg>
+          <div>
+            <h2 class="text-xl font-semibold mb-1">No usage yet</h2>
+            <p class="text-slate-400 text-sm max-w-md mx-auto">
+              Run <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie init</code> to enable
+              detected collectors, then <code class="px-1.5 py-0.5 bg-slate-800 rounded">tokie scan</code>
+              to ingest your usage. Refresh after — or toggle auto-refresh above.
+            </p>
+          </div>
         </section>
       </template>
 
